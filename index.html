@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob:; font-src 'self' data: https://cdn.jsdelivr.net; connect-src 'self' https://api.deepseek.com https://open.bigmodel.cn https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; worker-src 'self' blob: https://cdn.jsdelivr.net;" />
+  <meta id="theme-color" name="theme-color" content="#f5f5f7" />
+  <script>
+    // 在浏览器第一次绘制前恢复主题，避免先闪出默认白底。
+    // Zustand 的持久化数据格式为 { state: { theme }, version }。
+    (() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('chillpass-theme') || 'null')
+        const theme = saved?.state?.theme
+        const validThemes = ['light', 'dark', 'vista', 'codex']
+
+        if (validThemes.includes(theme) && theme !== 'light') {
+          document.documentElement.dataset.theme = theme
+        }
+
+        const themeColors = {
+          light: '#f5f5f7',
+          dark: '#0d0d0d',
+          vista: '#1a3a5c',
+          codex: '#0d1117',
+        }
+        document.getElementById('theme-color')?.setAttribute('content', themeColors[theme] || themeColors.light)
+      } catch {
+        // 存储损坏时保持浅色主题，应用启动后仍可正常修复设置。
+      }
+    })()
+  </script>
+  <style>
+    /* 关键首屏底色必须内联；完整样式加载前也不让浏览器露出白色画布。 */
+    html,
+    body,
+    #root {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background: #f5f5f7;
+    }
+
+    html[data-theme="dark"],
+    html[data-theme="dark"] body,
+    html[data-theme="dark"] #root {
+      background: #0d0d0d;
+      color-scheme: dark;
+    }
+
+    html[data-theme="vista"],
+    html[data-theme="vista"] body,
+    html[data-theme="vista"] #root {
+      background: linear-gradient(135deg, #1a3a5c 0%, #2c5a8c 30%, #3a7ab8 60%, #4a9ad8 100%);
+    }
+
+    html[data-theme="codex"],
+    html[data-theme="codex"] body,
+    html[data-theme="codex"] #root {
+      background: #0d1117;
+      color-scheme: dark;
+    }
+
+    #reload-snapshot {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483646;
+      overflow: hidden;
+      pointer-events: none;
+      background: inherit;
+    }
+
+    #reload-snapshot > .reload-snapshot-root {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+  <title>ChillPass — 期末冲刺助手</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    // 参考静态版的刷新快照：旧画面只作为不可交互遮罩保留，
+    // React 仍挂载到干净的 #root，完成首帧后再移除遮罩。
+    (() => {
+      const snapshotKey = 'chillpass-render-snapshot-v1'
+      const root = document.getElementById('root')
+      const currentUrl = location.pathname + location.search + location.hash
+
+      try {
+        const navigation = performance.getEntriesByType('navigation')[0]
+        if (navigation?.type === 'reload') {
+          const snapshot = JSON.parse(sessionStorage.getItem(snapshotKey) || 'null')
+          const fresh = snapshot && Date.now() - snapshot.savedAt < 60_000
+
+          if (fresh && snapshot.url === currentUrl && snapshot.html) {
+            if (snapshot.styles) {
+              const style = document.createElement('style')
+              style.id = 'reload-snapshot-styles'
+              style.textContent = snapshot.styles
+              document.head.appendChild(style)
+            }
+
+            const overlay = document.createElement('div')
+            overlay.id = 'reload-snapshot'
+            overlay.setAttribute('aria-hidden', 'true')
+            overlay.setAttribute('inert', '')
+            overlay.innerHTML = '<div class="reload-snapshot-root">' + snapshot.html + '</div>'
+            document.body.appendChild(overlay)
+
+            const removeSnapshot = () => {
+              requestAnimationFrame(() => {
+                overlay.remove()
+                document.getElementById('reload-snapshot-styles')?.remove()
+              })
+            }
+
+            const observer = new MutationObserver(() => {
+              if (root && root.childElementCount > 0) {
+                observer.disconnect()
+                removeSnapshot()
+              }
+            })
+            observer.observe(root, { childList: true })
+            window.setTimeout(() => {
+              observer.disconnect()
+              removeSnapshot()
+            }, 10_000)
+          }
+        }
+      } catch {
+        sessionStorage.removeItem(snapshotKey)
+      }
+
+      window.addEventListener('pagehide', () => {
+        try {
+          if (!root || root.childElementCount === 0) return
+
+          const devStyles = Array.from(document.querySelectorAll('style[data-vite-dev-id]'))
+            .map((style) => style.textContent || '')
+            .join('\n')
+          const snapshot = JSON.stringify({
+            url: location.pathname + location.search + location.hash,
+            html: root.innerHTML,
+            styles: devStyles,
+            savedAt: Date.now(),
+          })
+
+          // sessionStorage 常见上限约 5 MB，过大的课程页面退回到首屏底色方案。
+          if (snapshot.length <= 3_500_000) {
+            sessionStorage.setItem(snapshotKey, snapshot)
+          } else {
+            sessionStorage.removeItem(snapshotKey)
+          }
+        } catch {
+          sessionStorage.removeItem(snapshotKey)
+        }
+      })
+    })()
+  </script>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

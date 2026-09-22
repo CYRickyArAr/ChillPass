@@ -1,0 +1,24 @@
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--panel-control-size, 34px);
+  height: var(--panel-control-size, 34px);
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.button:hover, .active { background: var(--surface-subtle); color: var(--text-primary); }
+.button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }

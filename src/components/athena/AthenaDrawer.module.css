@@ -1,0 +1,72 @@
+.drawer {
+  display: flex;
+  position: relative;
+  z-index: 2;
+  flex: 0 0 var(--athena-render-width, 0px);
+  width: var(--athena-render-width, 0px);
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--control-border);
+  background: var(--bg-surface);
+  -webkit-app-region: no-drag;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 180ms ease, visibility 0s;
+}
+
+.resizeHandle {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 7px;
+  z-index: 20;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.resizeHandle:hover,
+.resizeHandle:focus-visible,
+.resizeHandle:active { background: color-mix(in srgb, var(--accent-text) 35%, transparent); }
+.resizeShield {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+/* 隐藏而不是卸载：不会中断流式回复，隐藏控件也不能被 Tab 聚焦。 */
+.drawer[hidden] {
+  display: flex;
+  border-left-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 180ms ease, visibility 0s 240ms;
+}
+
+/* 最大化同一个聊天实例，仍在应用工作区内，不调用浏览器全屏 API。 */
+.drawerExpanded {
+  border-left: none;
+}
+
+@media (max-width: 700px) {
+  .drawer {
+    position: absolute;
+    /* 聊天顶栏与学习顶栏同高、同起点，右侧按钮不会上下跳动。 */
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    width: min(var(--athena-render-width, 0px), 100%);
+    height: auto;
+  }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .drawer[hidden] { transition: none; }
+}
