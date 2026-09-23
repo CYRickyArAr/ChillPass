@@ -1322,6 +1322,9 @@ ${relevantContext}`
         if (nextLimit <= maxTokens) {
           throw new Error(serviceText('progress.outputCeilingReached', { limit: String(maxTokens) }))
         }
+        if (truncationRetries >= 1) {
+          throw new Error(serviceText('progress.truncationNeedsManualRetry', { limit: String(maxTokens) }))
+        }
         if (signal?.aborted) throw abortError()
         // Save before issuing the next request, so refresh/cancel cannot reset the earned limit.
         recovery.onBudgetChange?.({ key: outputPolicy.key, maxTokens: nextLimit })

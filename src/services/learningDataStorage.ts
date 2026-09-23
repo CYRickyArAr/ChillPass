@@ -46,7 +46,7 @@ async function request(body?: object) {
 function stage(key: string, value: Pending) {
   pending.set(key, value)
   try { localStorage.setItem(pendingKey(key), JSON.stringify(value)) }
-  catch { notice('浏览器待保存缓冲区已满，正在尝试写入硬盘。保存完成前请勿关闭程序。') }
+  catch { /* Browser cache is optional; disk-save failures are reported by flushLearningData. */ }
 }
 
 export async function flushLearningData(): Promise<void> {

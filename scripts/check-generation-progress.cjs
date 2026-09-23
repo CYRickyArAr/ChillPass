@@ -83,7 +83,7 @@ async function main() {
     plugins: [{ name: 'isolated-fixtures', setup(b) {
       b.onResolve({ filter: /@stores\/(settingsStore|tokenStore|languageStore|courseStore)$/ }, args => ({ path: args.path, namespace: 'mock' }))
       b.onLoad({ filter: /.*/, namespace: 'mock' }, ({ path: name }) => {
-        if (name.endsWith('settingsStore')) return { contents: `const getState = () => ({ provider:'deepseek', apiKey:'test-key-not-real', zhipuApiKey:'', model:'test-model', fastResponses:true, economyLessons:false, ...globalThis.fixtureAiSettings }); export const useSettingsStore = Object.assign(select => select(getState()), { getState })` }
+        if (name.endsWith('settingsStore')) return { contents: `const getState = () => ({ provider:'deepseek', apiKey:'test-key-not-real', zhipuApiKey:'', model:'test-model', fastResponses:true, economyLessons:false, ...globalThis.fixtureAiSettings }); export const useSettingsStore = Object.assign(select => select(getState()), { getState }); export const getProviderConnection = () => ({ baseUrl:'https://api.deepseek.com', apiKey:'test-key-not-real' })` }
         if (name.endsWith('tokenStore')) return { contents: `export const useTokenStore = { getState: () => ({ recordUsage() {} }) }` }
         if (name.endsWith('courseStore')) return { contents: `export const useCourseStore = Object.assign(select => select(globalThis.fixtureCourseState), { getState: () => globalThis.fixtureCourseState })` }
         return { contents: `export const useLanguageStore = Object.assign(select => select({ language:'zh' }), { getState: () => ({ language:'zh' }) })` }
@@ -124,6 +124,7 @@ async function main() {
   const unsubscribe = store.subscribe(state => seen.push(structuredClone(state.items)))
   let passed = 0
   async function test(name, fn) {
+    if (process.argv[2] && !name.includes(process.argv[2])) return
     reset(); seen.length = 0
     await fn()
     passed++
@@ -1050,8 +1051,8 @@ async function main() {
       const concise = bodies[1]
       assert.equal(concise.model, 'deepseek-flash')
       assert.equal(concise.thinking.type, 'disabled')
-      assert.equal(concise.max_tokens, 1536)
-      assert(concise.max_tokens < full.max_tokens / 5)
+      assert.equal(concise.max_tokens, 8192)
+      assert.equal(concise.max_tokens, full.max_tokens, 'the limit is a ceiling, not a spending target')
       const chars = body => body.messages.reduce((n, message) => n + message.content.length, 0)
       assert(chars(concise) < chars(full) * 0.5)
       assert.equal(result.quiz[0].objective, result.learningDesign.objectives[0])
@@ -1083,7 +1084,7 @@ async function main() {
       global.fetch = async (_url, options) => { calls++; bodies.push(JSON.parse(options.body)); return completion({ explanation: 'No objectives or valid questions', quiz: [] }) }
       await assert.rejects(api.generateLessonContent({ id: 'invalid-budget', title: 'Point', description: 'Test', priority: 'must' }, 'Source'))
       assert.equal(calls, 2)
-      assert(bodies.every(body => body.max_tokens === 1536), 'retry does not silently double the output allowance')
+      assert(bodies.every(body => body.max_tokens === 8192), 'format retry does not silently raise the output allowance')
     } finally { global.fixtureAiSettings = undefined }
   })
 
@@ -1098,7 +1099,7 @@ async function main() {
       await api.generateLessonContent(merged, source)
       const prompt = bodies[0].messages[1].content
       for (const topic of topics) { assert(prompt.includes(`${topic.title} evidence`)); assert(prompt.includes(`${topic.title}=1`)) }
-      assert(bodies[0].max_tokens > 1536, 'larger merged units are not silently squeezed into one topic budget')
+      assert.equal(bodies[0].max_tokens, 8192, 'merged units begin with the same generous ceiling')
       const boundary = { id: 'boundary', title: 'FOCUSED_TOKEN', description: 'Important rule', priority: 'must' }
       await api.generateLessonContent(boundary, 'unrelated filler '.repeat(106) + '\nFOCUSED_TOKEN means use the marked rule.\n' + 'more filler '.repeat(500))
       assert(bodies[1].messages[1].content.includes('means use the marked rule'))
@@ -1163,7 +1164,7 @@ async function main() {
     } finally { global.fixtureAiSettings = undefined }
   })
 
-  await test('confirmed truncation keeps raising the output limit until success or the provider ceiling', async () => {
+  await test('confirmed truncation retries once automatically, then waits for a manual retry', async () => {
     global.fixtureAiSettings = { economyLessons: true }
     const bodies = []
     const truncated = () => new Response(JSON.stringify({ choices: [{ message: { content: '{"explanation":"partial' }, finish_reason: 'length' }] }), { headers: { 'content-type': 'application/json' } })
@@ -1171,30 +1172,37 @@ async function main() {
     try {
       global.fetch = async (_url, options) => {
         bodies.push(JSON.parse(options.body))
-        return bodies.length <= 3 ? truncated() : completion(designedLesson({ explanation: 'Complete explanation', quiz: [{ type: 'short', question: 'Apply the rule', answer: 'Complete answer', explanation: 'Reason' }] }))
+        return bodies.length === 1 ? truncated() : completion(designedLesson({ explanation: 'Complete explanation', quiz: [{ type: 'short', question: 'Apply the rule', answer: 'Complete answer', explanation: 'Reason' }] }))
       }
       assert.equal((await api.generateLessonContent(point, 'Source')).explanation, 'Complete explanation')
-      assert.deepEqual(bodies.map(body => body.max_tokens), [1536, 2304, 4096, 8192])
+      assert.deepEqual(bodies.map(body => body.max_tokens), [8192, 16384])
       assert(bodies.every(body => body.model === 'deepseek-flash'))
-      assert(latest().retryHint.includes('8192'))
-      assert.equal(latest().truncationRetries, 3)
+      assert(latest().retryHint.includes('16384'))
+      assert.equal(latest().truncationRetries, 1)
       assert.equal(latest().validationRetry, 0, 'truncation is not a malformed-JSON failure')
-      assert.equal(latest().outputTokens, 8192)
-      assert.equal(latest().attempt, 4)
+      assert.equal(latest().outputTokens, 16384)
+      assert.equal(latest().attempt, 2)
       assert.equal(latest().maxAttempts, undefined, 'do not display a misleading 1/2 total')
       const markup = renderToStaticMarkup(React.createElement(api.OperationProgressCard, { item: { ...latest(), stage: 'receiving' } }))
-      assert(markup.includes('8192'))
-      assert(markup.includes('第 4 次请求'))
+      assert(markup.includes('16384'))
+      assert(markup.includes('第 2 次请求'))
       assert.equal(latest().stage, 'done')
       bodies.length = 0
       global.fetch = async (_url, options) => { bodies.push(JSON.parse(options.body)); return truncated() }
-      await assert.rejects(api.generateLessonContent(point, 'Source'), /截断/)
-      assert.deepEqual(bodies.map(body => body.max_tokens), [1536, 2304, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 393216])
+      await assert.rejects(api.generateLessonContent(point, 'Source'), /自动加额重试 1 次/)
+      assert.deepEqual(bodies.map(body => body.max_tokens), [8192, 16384])
       assert.equal(latest().stage, 'failed')
-      assert(latest().error.includes('393216'))
-      assert(latest().error.includes('上限'))
-      assert(!latest().error.includes('2 次'))
-      assert.equal(bodies.filter(body => body.max_tokens === 393216).length, 1, 'do not repeat an impossible ceiling')
+      assert(latest().error.includes('16384'))
+      assert(latest().error.includes('手动重试'))
+      bodies.length = 0
+      const raised = []
+      await assert.rejects(api.generateLessonContent(point, 'Source', undefined, '', [], {
+        savedBudget: { key: 'deepseek:deepseek-flash:concise', maxTokens: 16384 },
+        previousError: latest().error,
+        onBudgetChange: budget => raised.push(budget.maxTokens),
+      }), /自动加额重试 1 次/)
+      assert.deepEqual(bodies.map(body => body.max_tokens), [32768, 65536])
+      assert.deepEqual(raised, [32768, 65536], 'manual retry resumes above the failed allowance')
     } finally { global.fixtureAiSettings = undefined }
   })
 
@@ -1399,25 +1407,34 @@ async function main() {
     const savedBudget = { key: 'deepseek:deepseek-flash:concise', maxTokens: 32768 }
     assert.equal(api.lessonOutputPolicy(point, 'deepseek', 'deepseek-flash', true, { savedBudget }).maxTokens, 32768)
     assert.equal(api.lessonOutputPolicy(point, 'deepseek', 'deepseek-v4-pro', false, { savedBudget }).maxTokens, 8192)
-    assert.equal(api.lessonOutputPolicy(point, 'zhipu', 'glm-5.3', true, { savedBudget }).maxTokens, 1536)
-    for (const maxTokens of [NaN, Infinity, -1]) assert.equal(api.lessonOutputPolicy(point, 'deepseek', 'deepseek-flash', true, { savedBudget: { ...savedBudget, maxTokens } }).maxTokens, 1536)
+    assert.equal(api.lessonOutputPolicy(point, 'zhipu', 'glm-5.3', true, { savedBudget }).maxTokens, 8192)
+    for (const maxTokens of [NaN, Infinity, -1]) assert.equal(api.lessonOutputPolicy(point, 'deepseek', 'deepseek-flash', true, { savedBudget: { ...savedBudget, maxTokens } }).maxTokens, 8192)
     assert.equal(api.lessonOutputPolicy(point, 'deepseek', 'deepseek-flash', true, { savedBudget: { ...savedBudget, maxTokens: Number.MAX_SAFE_INTEGER } }).maxTokens, 393216)
     assert.equal(api.lessonOutputCeiling('zhipu', 'glm-5.3'), 131072)
     assert.equal(api.lessonOutputCeiling('zhipu', 'glm-4.5'), 98304)
     assert.equal(api.nextLessonOutputLimit(65536, 98304), 98304)
     assert.equal(api.nextLessonOutputLimit(98304, 98304), 98304)
-    assert.equal(api.lessonOutputCeiling('deepseek', 'unknown-model'), 8192)
+    assert.equal(api.lessonOutputCeiling('deepseek', 'unknown-model'), 393216)
+    assert.equal(api.lessonOutputCeiling('custom:opencode', 'deepseek-v4.1-flash'), 393216)
+    assert.equal(api.lessonOutputCeiling('custom', 'unknown-model'), 393216)
+    assert.equal(api.lessonOutputCeiling('zhipu', 'unknown-model'), 131072)
+    assert.equal(api.nextLessonOutputLimit(8192, api.lessonOutputCeiling('custom:opencode', 'deepseek-v4.1-flash')), 16384)
+    const openCodeBudget = { key: 'custom:opencode:deepseek-v4.1-flash:concise', maxTokens: 8192 }
+    assert.equal(api.lessonOutputPolicy(point, 'custom:opencode', 'deepseek-v4.1-flash', true, { savedBudget: openCodeBudget }).maxTokens, 8192)
+    assert.equal(api.lessonOutputPolicy(point, 'custom:opencode', 'deepseek-v4.1-flash', true, {
+      savedBudget: openCodeBudget, previousError: '已达到当前模型/接口输出上限 8192 tokens，仍被截断',
+    }).maxTokens, 16384)
     global.fixtureAiSettings = { economyLessons: false, model: 'deepseek-v4-pro' }
     const bodies = []
     try {
       global.fetch = async (_url, options) => {
         bodies.push(JSON.parse(options.body))
-        return bodies.length <= 2
+        return bodies.length === 1
           ? new Response(JSON.stringify({ choices: [{ message: { content: 'partial' }, finish_reason: 'length' }] }), { headers: { 'content-type': 'application/json' } })
           : completion(designedLesson({ explanation: 'Full content', quiz: [{ type: 'short', question: 'Concrete task', answer: 'Answer', explanation: 'Reason' }] }))
       }
       await api.generateLessonContent(point, 'Source', undefined, '', [], { savedBudget })
-      assert.deepEqual(bodies.map(body => body.max_tokens), [8192, 16384, 32768])
+      assert.deepEqual(bodies.map(body => body.max_tokens), [8192, 16384])
       assert(bodies.every(body => body.model === 'deepseek-v4-pro'))
     } finally { global.fixtureAiSettings = undefined }
   })
@@ -1430,17 +1447,17 @@ async function main() {
     try {
       global.fetch = async (_url, options) => {
         bodies.push(JSON.parse(options.body))
-        return bodies.length <= 2 ? truncated() : completion('{invalid JSON')
+        return bodies.length === 1 ? truncated() : completion('{invalid JSON')
       }
       await assert.rejects(api.generateLessonContent(point, 'Source'), /JSON/)
-      assert.deepEqual(bodies.map(body => body.max_tokens), [1536, 2304, 4096, 4096])
+      assert.deepEqual(bodies.map(body => body.max_tokens), [8192, 16384, 16384])
       bodies.length = 0
       global.fetch = async (_url, options) => {
         bodies.push(JSON.parse(options.body))
         return bodies.length === 1 ? truncated() : new Response('Unauthorized', { status: 401 })
       }
       await assert.rejects(api.generateLessonContent(point, 'Source'), /401/)
-      assert.deepEqual(bodies.map(body => body.max_tokens), [1536, 2304])
+      assert.deepEqual(bodies.map(body => body.max_tokens), [8192, 16384])
       bodies.length = 0
       global.fetch = async (_url, options) => { bodies.push(JSON.parse(options.body)); return truncated() }
       await assert.rejects(api.generateLessonContent(point, 'Source', undefined, '', [], { onBudgetChange: () => { throw new Error('Mock storage full') } }), /Mock storage full/)
