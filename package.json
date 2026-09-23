@@ -1,12 +1,13 @@
 {
   "name": "chillpass-web",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ChillPass - 期末冲刺助手 | AI 驱动的闯关式备考应用（浏览器版）",
   "author": "ChillPass",
   "license": "MIT",
   "scripts": {
     "start": "node server.mjs",
     "test:storage": "node scripts/learning-data-regression.cjs && node scripts/storage-regression.cjs",
+    "test:updates": "node scripts/check-source-updates.cjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"

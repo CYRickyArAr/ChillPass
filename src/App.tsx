@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { BookOpen, FolderOpen, HardDrive } from 'lucide-react'
+import { BookOpen, Download, FolderOpen, HardDrive, X } from 'lucide-react'
 import Sidebar from './components/layout/Sidebar'
 import AthenaDrawer from './components/athena/AthenaDrawer'
 import AthenaPanelControls from './components/athena/AthenaPanelControls'
@@ -31,6 +31,7 @@ import StorageSettings from './pages/settings/StorageSettings'
 import AboutSettings from './pages/settings/AboutSettings'
 import styles from './App.module.css'
 import { useT } from './i18n'
+import type { UpdateInfo } from './types'
 
 /**
  * 侧栏导航只让新页面做一次短横移；动画结束立即清理临时方向状态。
@@ -100,6 +101,7 @@ export default function App() {
   const [storagePromptOpen, setStoragePromptOpen] = useState(false)
   const [storagePromptPath, setStoragePromptPath] = useState('')
   const [storagePromptBusy, setStoragePromptBusy] = useState(false)
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null)
   const workspaceTitle = location.pathname.startsWith('/lessons')
     ? courseName || t('nav.lessons')
     : location.pathname.startsWith('/settings') ? t('nav.settings')
@@ -117,6 +119,31 @@ export default function App() {
     // 首次使用自动创建本地账号
     ensureAccount()
   }, [t])
+
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      window.electronAPI?.checkForUpdates()
+        .then(info => {
+          if (cancelled || !info) return
+          try {
+            if (window.localStorage.getItem('chillpass-dismissed-update') === info.version) return
+          } catch { /* Browser storage may be unavailable; still show the notice. */ }
+          setAvailableUpdate(info)
+        })
+        .catch(() => {}) // An offline check must not interrupt study.
+    }, 2000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [])
+
+  const dismissUpdate = () => {
+    if (!availableUpdate) return
+    try { window.localStorage.setItem('chillpass-dismissed-update', availableUpdate.version) } catch {}
+    setAvailableUpdate(null)
+  }
 
   useEffect(() => {
     const resumePersistedOperations = () => {
@@ -254,6 +281,23 @@ export default function App() {
           <AthenaDrawer />
         </div>
       </div>
+      {availableUpdate && !welcomeVisible && !storagePromptOpen && (
+        <aside className={styles.updateNotice} role="status" aria-live="polite">
+          <div className={styles.updateNoticeCopy}>
+            <strong>{t('about.updateAvailable').replace('{version}', availableUpdate.version)}</strong>
+            <span>{t('about.sourceUpdateHint')}</span>
+          </div>
+          <div className={styles.updateNoticeActions}>
+            <a href={availableUpdate.downloadUrl} target="_blank" rel="noopener noreferrer">
+              <Download size={15} strokeWidth={2} />
+              {t('about.downloadSource')}
+            </a>
+            <button type="button" onClick={dismissUpdate} aria-label={t('about.updateLater')}>
+              <X size={17} strokeWidth={2} />
+            </button>
+          </div>
+        </aside>
+      )}
       {/* 首次使用欢迎向导 */}
       <WelcomeModal />
       {storagePromptOpen && (

@@ -35,7 +35,13 @@ const DIST_DIR = join(BASE_DIR, 'dist');
 const TRAY_SCRIPT = join(BASE_DIR, 'tray.ps1');
 const ICON_PATH = join(BASE_DIR, 'icon.ico');
 const PORT = Number(process.env.CHILLPASS_PORT) || 5174;
-const APP_VERSION = '0.1.1';
+const APP_VERSION = (() => {
+  try {
+    const version = JSON.parse(readFileSync(join(BASE_DIR, 'package.json'), 'utf8')).version;
+    if (/^\d+\.\d+\.\d+$/.test(version)) return version;
+  } catch { /* Portable EXE has no package.json beside it. */ }
+  return '0.1.2';
+})();
 const BUILD_ID = '20260922-local-learning-data';
 const GITHUB_REPO = 'CYRickyArAr/ChillPass';
 const DEFAULT_COURSE_STORAGE_ROOT = join(os.homedir(), 'Documents', 'ChillPass');
@@ -354,6 +360,20 @@ async function fetchLatestRelease() {
   return null;
 }
 
+async function fetchLatestSourceVersion() {
+  const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/package.json?ref=master`;
+  for (const url of [apiUrl, `https://gh-proxy.com/${apiUrl}`]) {
+    try {
+      const file = await httpsGetJson(url, 8000);
+      if (file.encoding !== 'base64' || typeof file.content !== 'string') throw new Error('Invalid package response');
+      const pkg = JSON.parse(Buffer.from(file.content.replace(/\s/g, ''), 'base64').toString('utf8'));
+      if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) throw new Error('Invalid remote version');
+      return pkg.version;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 function normalizeProviderModelsUrl(rawUrl) {
   const url = new URL(String(rawUrl || ''));
   if (!['http:', 'https:'].includes(url.protocol)) {
@@ -518,25 +538,22 @@ async function handleApi(req, res, urlPath) {
     sendJson(res, { ok: true });
     return true;
   }
-  // 检查更新（后端请求 GitHub，避免浏览器跨域/网络限制）
+  // 源码版只检查版本并提供 ZIP 下载地址，不启动安装程序。
   if (urlPath === '/api/checkForUpdates' && req.method === 'GET') {
-    const release = await fetchLatestRelease();
-    if (!release) {
+    res.setHeader('Cache-Control', 'no-store');
+    const latestVersion = await fetchLatestSourceVersion();
+    if (!latestVersion) {
       sendJson(res, { error: '无法获取版本信息，请检查网络连接后重试' }, 502);
       return true;
     }
-    const latestVersion = String(release.tag_name || '0.0.0').replace(/^v/, '');
-    const asset = (release.assets || []).find(
-      (a) => /\.exe$/i.test(a.name) && !/\.blockmap$/i.test(a.name),
-    );
     const hasUpdate = compareVersion(latestVersion, APP_VERSION) > 0;
     sendJson(res, {
       updateAvailable: hasUpdate,
       latestVersion,
       currentVersion: APP_VERSION,
-      downloadUrl: asset ? asset.browser_download_url : (release.html_url || ''),
-      releaseNotes: release.body || '',
-      releaseDate: release.published_at || '',
+      downloadUrl: `https://github.com/${GITHUB_REPO}/archive/refs/heads/master.zip`,
+      releaseNotes: '',
+      releaseDate: '',
     });
     return true;
   }

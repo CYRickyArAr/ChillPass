@@ -58,6 +58,17 @@ export type TranslationKey =
   | 'about.wechat'
   | 'about.copy'
   | 'about.copied'
+  | 'about.currentVersion'
+  | 'about.updateTitle'
+  | 'about.updateDesc'
+  | 'about.checkUpdate'
+  | 'about.checkingUpdate'
+  | 'about.updateAvailable'
+  | 'about.upToDate'
+  | 'about.updateError'
+  | 'about.downloadSource'
+  | 'about.updateLater'
+  | 'about.sourceUpdateHint'
   | 'titlebar.balance'
   | 'titlebar.balanceQuery'
   | 'titlebar.balanceLoading'
@@ -802,6 +813,17 @@ const zh: Record<TranslationKey, string> = {
   'about.wechat': '微信号',
   'about.copy': '复制',
   'about.copied': '已复制',
+  'about.currentVersion': '当前版本',
+  'about.updateTitle': '检查更新',
+  'about.updateDesc': '检查 GitHub 上是否有更新的源码版本，不会自动安装或覆盖数据。',
+  'about.checkUpdate': '检查更新',
+  'about.checkingUpdate': '正在检查…',
+  'about.updateAvailable': '发现新版本 {version}',
+  'about.upToDate': '已经是最新版本',
+  'about.updateError': '暂时无法检查更新，请确认网络后重试。',
+  'about.downloadSource': '下载最新源码 ZIP',
+  'about.updateLater': '稍后',
+  'about.sourceUpdateHint': '解压到新的程序文件夹后启动；课程数据仍在本机文档目录。',
   'titlebar.balance': '供应商余额',
   'titlebar.balanceQuery': '查询余额',
   'titlebar.balanceLoading': '查询中',
@@ -1525,6 +1547,17 @@ const en: Record<TranslationKey, string> = {
   'about.wechat': 'WeChat',
   'about.copy': 'Copy',
   'about.copied': 'Copied',
+  'about.currentVersion': 'Current version',
+  'about.updateTitle': 'Check for updates',
+  'about.updateDesc': 'Check GitHub for a newer source version. Nothing is installed or overwritten automatically.',
+  'about.checkUpdate': 'Check for updates',
+  'about.checkingUpdate': 'Checking…',
+  'about.updateAvailable': 'Version {version} is available',
+  'about.upToDate': 'You have the latest version',
+  'about.updateError': 'Unable to check for updates. Please check your connection and try again.',
+  'about.downloadSource': 'Download latest source ZIP',
+  'about.updateLater': 'Later',
+  'about.sourceUpdateHint': 'Extract to a new app folder and start it there. Course data remains in your Documents folder.',
   'titlebar.balance': 'Provider balance',
   'titlebar.balanceQuery': 'Check balance',
   'titlebar.balanceLoading': 'Loading',

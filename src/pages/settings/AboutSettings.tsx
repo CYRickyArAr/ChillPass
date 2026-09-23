@@ -5,8 +5,12 @@ import {
   MessageCircle,
   Copy,
   Check,
+  Download,
+  RefreshCw,
 } from 'lucide-react'
 import { useT } from '../../i18n'
+import type { UpdateInfo, UpdateStatus } from '../../types'
+import packageJson from '../../../package.json'
 import styles from './SettingsSub.module.css'
 
 export default function AboutSettings() {
@@ -14,6 +18,21 @@ export default function AboutSettings() {
   const t = useT()
 
   const [copied, setCopied] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle')
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+
+  const checkUpdate = async () => {
+    setUpdateStatus('checking')
+    try {
+      if (!window.electronAPI) throw new Error('Update API unavailable')
+      const info = await window.electronAPI.checkForUpdates()
+      setUpdateInfo(info)
+      setUpdateStatus(info ? 'available' : 'not-available')
+    } catch {
+      setUpdateInfo(null)
+      setUpdateStatus('error')
+    }
+  }
 
   const handleCopyWechat = () => {
     navigator.clipboard.writeText('Eikawa_Koi').then(() => {
@@ -50,7 +69,38 @@ export default function AboutSettings() {
             <span className={styles.infoLabel}>{t('about.appName')}</span>
             <span className={styles.infoValue}>ChillPass</span>
           </div>
+          <div className={styles.infoRow}>
+            <span className={styles.infoLabel}>{t('about.currentVersion')}</span>
+            <span className={styles.infoValue}>{packageJson.version}</span>
+          </div>
         </div>
+      </section>
+
+      <section className={`liquid-glass ${styles.card}`}>
+        <div className={styles.cardHeader}>
+          <h2 className={styles.cardTitle}>{t('about.updateTitle')}</h2>
+          <p className={styles.cardDesc}>{t('about.updateDesc')}</p>
+        </div>
+        <div className={styles.actions}>
+          <button type="button" className={styles.ghostBtn} onClick={checkUpdate} disabled={updateStatus === 'checking'}>
+            <RefreshCw size={16} strokeWidth={2} />
+            {updateStatus === 'checking' ? t('about.checkingUpdate') : t('about.checkUpdate')}
+          </button>
+          {updateInfo && (
+            <a className={styles.linkBtn} href={updateInfo.downloadUrl} target="_blank" rel="noopener noreferrer">
+              <Download size={16} strokeWidth={2} />
+              {t('about.downloadSource')}
+            </a>
+          )}
+        </div>
+        {updateStatus === 'available' && updateInfo && (
+          <p className={styles.updateStatus} role="status">
+            {t('about.updateAvailable').replace('{version}', updateInfo.version)}<br />
+            {t('about.sourceUpdateHint')}
+          </p>
+        )}
+        {updateStatus === 'not-available' && <p className={styles.updateStatus} role="status">{t('about.upToDate')}</p>}
+        {updateStatus === 'error' && <p className={styles.updateStatus} role="alert">{t('about.updateError')}</p>}
       </section>
 
       {/* 加入我们 */}

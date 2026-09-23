@@ -6,6 +6,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import { exec } from 'node:child_process'
 import { createRequire } from 'node:module'
+const APP_VERSION: string = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version
 const { createDataStorage, migrateRoot } = createRequire(import.meta.url)('./installer/data-storage.cjs')
 const handleLearningData = createDataStorage(() => courseStorageRoot)
 
@@ -209,7 +210,7 @@ async function fetchProviderModelsThroughServer(rawUrl: string, apiKey: string) 
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${key}`,
-        'User-Agent': 'ChillPass/0.1.1',
+        'User-Agent': `ChillPass/${APP_VERSION}`,
       },
       signal: controller.signal,
     })
@@ -243,7 +244,7 @@ export default defineConfig({
             const urlPath = requestUrl.pathname
             if (!urlPath.startsWith('/api/')) return next()
             if (await handleLearningData(req, res, urlPath)) return
-            if (urlPath === '/api/getAppVersion') return sendJson(res, { version: '0.1.1', buildId: 'development-local-learning-data' })
+            if (urlPath === '/api/getAppVersion') return sendJson(res, { version: APP_VERSION, buildId: 'development-local-learning-data' })
 
             if (urlPath === '/api/fetchProviderModels' && req.method === 'POST') {
               const body = await readRequestJson(req)

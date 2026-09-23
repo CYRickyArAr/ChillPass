@@ -65,11 +65,14 @@ AI 功能会将相关课件内容和问题发送给你配置的模型服务，�
 
 下载最新 ZIP，解压到新的程序文件夹，再运行 `Start-ChillPass.bat`。学习数据在用户文档目录，不随程序文件夹删除。使用原浏览器和访问地址可保留 API key 等设置。不要用旧 release 覆盖本仓库。
 
+程序启动后会检查 GitHub 仓库 `package.json` 中的版本号；发现更高版本时仅提示下载源码 ZIP，不会自动安装或覆盖文件。也可在“设置 → 关于”手动检查。每次发布新版源码时须递增 `package.json` 与 `package-lock.json` 的版本号，否则旧版不会提示更新。
+
 ## 开发检查
 
 ```powershell
 npm run build
 npm run test:storage
+npm run test:updates
 ```
 
 存储测试使用 `output/` 下的隔离数据，不读取个人课件。便携 EXE 的 PDF 测试需显式提供测试 PDF 路径。

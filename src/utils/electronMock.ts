@@ -18,6 +18,7 @@ import {
 } from '@services/browserFileStore'
 import { translate, type TranslationKey } from '../i18n'
 import { useLanguageStore } from '@stores/languageStore'
+import packageJson from '../../package.json'
 
 /** 浏览器 Mock 提示文案（当前语言） */
 function mockText(key: TranslationKey, map?: Record<string, string>): string {
@@ -50,9 +51,11 @@ function compareVersions(v1: string, v2: string): number {
   return 0
 }
 
-const APP_VERSION = '0.1.1'
+const APP_VERSION = packageJson.version
 const UPDATE_CHECK_URL =
-  'https://api.github.com/repos/CYRickyArAr/ChillPass/releases/latest'
+  'https://api.github.com/repos/CYRickyArAr/ChillPass/contents/package.json?ref=master'
+const SOURCE_DOWNLOAD_URL =
+  'https://github.com/CYRickyArAr/ChillPass/archive/refs/heads/master.zip'
 
 export function setupElectronMock() {
   if (window.electronAPI) return
@@ -218,9 +221,9 @@ export function setupElectronMock() {
       }
     },
 
-    // ===== 更新检查（优先走后端 API，避免浏览器直连 GitHub 被限制） =====
+    // ===== 源码更新检查：仅提示下载，不安装或覆盖本地文件 =====
     checkForUpdates: async () => {
-      // 安装版：由 app.cjs 后端请求 GitHub API（带代理 fallback）
+      // 本地服务优先代理 GitHub 请求，浏览器直连仅作为回退。
       try {
         const res = await fetch('/api/checkForUpdates')
         if (res.ok) {
@@ -228,40 +231,38 @@ export function setupElectronMock() {
           if (!data.updateAvailable) return null
           return {
             version: data.latestVersion,
-            releaseNotes: data.releaseNotes || mockText('mock.noReleaseNotes'),
-            downloadUrl: data.downloadUrl || '',
-            releaseDate: data.releaseDate || '',
+            releaseNotes: '',
+            downloadUrl: SOURCE_DOWNLOAD_URL,
+            releaseDate: '',
             currentVersion: data.currentVersion || APP_VERSION,
           }
         }
         throw new Error(`HTTP ${res.status}`)
       } catch {
-        // 回退：直接请求 GitHub API（网页预览模式）
+        // Vite 开发服务没有该端点时，直接读取仓库的 package.json。
         try {
           const response = await fetch(UPDATE_CHECK_URL, {
-            headers: {
-              'User-Agent': 'ChillPass-Update-Checker',
-              Accept: 'application/vnd.github+json',
-            },
+            headers: { Accept: 'application/vnd.github+json' },
+            cache: 'no-store',
+            signal: AbortSignal.timeout(12000),
           })
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
-          const release = await response.json()
-
-          const latestVersion = release.tag_name || '0.0.0'
-          const exeAsset = release.assets?.find(
-            (a: any) => a.name.endsWith('.exe') && !a.name.endsWith('.blockmap'),
-          )
-          const downloadUrl =
-            exeAsset?.browser_download_url || release.html_url || ''
-          const releaseNotes = release.body || mockText('mock.noReleaseNotes')
-          const releaseDate = release.published_at || new Date().toISOString()
+          const file = await response.json()
+          if (file.encoding !== 'base64' || typeof file.content !== 'string') {
+            throw new Error('Invalid package response')
+          }
+          const bytes = Uint8Array.from(atob(file.content.replace(/\s/g, '')), c => c.charCodeAt(0))
+          const latestVersion = JSON.parse(new TextDecoder().decode(bytes)).version
+          if (typeof latestVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(latestVersion)) {
+            throw new Error('Invalid remote version')
+          }
 
           if (compareVersions(latestVersion, APP_VERSION) > 0) {
             return {
               version: latestVersion,
-              releaseNotes,
-              downloadUrl,
-              releaseDate,
+              releaseNotes: '',
+              downloadUrl: SOURCE_DOWNLOAD_URL,
+              releaseDate: '',
               currentVersion: APP_VERSION,
             }
           }
