@@ -1,11 +1,11 @@
 import { memo, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ChangeEvent as ReactChangeEvent, CSSProperties } from 'react'
-import { ArrowUp, ArrowDown, Trash2, Sparkles, X, Brain, Zap, Download, Upload, Plus, FileText, BookOpen, Calendar, MessageCircle, Shield, Waves, ChevronDown, Check, Square, Pencil, RefreshCw } from 'lucide-react'
-import { useChatStore } from '@stores/chatStore'
+import { ArrowUp, ArrowDown, Trash2, Sparkles, X, Brain, Download, Upload, Plus, FileText, BookOpen, Calendar, MessageCircle, Shield, Waves, ChevronDown, Check, Square, Pencil, RefreshCw } from 'lucide-react'
+import { useChatStore, EMPTY_CONVERSATION_MEMORIES } from '@stores/chatStore'
 import { useAthenaPanelStore } from '@stores/athenaPanelStore'
 import AthenaPanelControls from '../components/athena/AthenaPanelControls'
-import { useCurrentBundle } from '@stores/courseStore'
+import { useCourseStore } from '@stores/courseStore'
 import { useAthenaStore } from '@stores/athenaStore'
 import { useT } from '../i18n'
 import type { TranslationKey } from '../i18n'
@@ -16,8 +16,9 @@ import { storeFile } from '@services/browserFileStore'
 import { BUILTIN_MODELS, modelVisionSupport } from '@services/modelCatalog'
 import { useGlobalBlur } from '@utils/useGlobalBlur'
 import { useSettingsStore } from '@stores/settingsStore'
-import type { ChatMessage, AthenaAbility, AthenaMemory, AthenaTaskType, AthenaThinkingMode } from '@types/index'
+import type { ChatMessage, AthenaTaskType, AthenaThinkingMode } from '@types/index'
 import { renderMarkdownBlockCached, splitStreamingBlocks } from '../utils/markdown'
+import { athenaText } from '../utils/athenaText'
 import styles from './AIChatPage.module.css'
 
 // Athena 任务定义
@@ -319,15 +320,31 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
   const convMenuRef = useRef<HTMLDivElement>(null)
   const currentConversation = conversations.find(c => c.id === currentId)
 
-  const bundle = useCurrentBundle()
-  const rawText = bundle?.rawText ?? ''
+  const courses = useCourseStore(s => s.courses)
+  const selectedCourseId = useCourseStore(s => s.currentCourseId)
+  const groupCourseId = currentConversation ? currentConversation.courseId : selectedCourseId || null
+  const bundle = courses.find(c => c.course.id === groupCourseId)
   const currentCourse = bundle?.course
+  const conversationGroups = useMemo(() => {
+    const groups = courses.map(c => ({ courseId: c.course.id as string | null, title: c.course.name, deleted: false }))
+    for (const conv of conversations) {
+      if (conv.courseId && !groups.some(group => group.courseId === conv.courseId)) {
+        groups.push({ courseId: conv.courseId, title: t('athena.groupDeleted').replace('{course}', conv.courseName || '原课程'), deleted: true })
+      }
+    }
+    groups.push({ courseId: null, title: t('athena.groupGeneral'), deleted: false })
+    // Only groups with conversations are expanded; empty courses collapse into a single new-chat row.
+    return groups.map(group => ({
+      ...group,
+      conversations: conversations.filter(conv => conv.courseId === group.courseId)
+        .slice().sort((a, b) => b.updatedAt - a.updatedAt),
+      active: group.courseId === groupCourseId,
+    }))
+  }, [courses, conversations, groupCourseId, t])
 
-  // Athena store
-  const abilities = useAthenaStore(s => s.abilities)
-  const memories = useAthenaStore(s => s.memories)
-  const addAutoAbility = useAthenaStore(s => s.addAutoAbility)
-  const addAutoMemory = useAthenaStore(s => s.addAutoMemory)
+  // Memories belong to conversations; Athena only supplies model preferences.
+  const memories = currentConversation?.memories ?? EMPTY_CONVERSATION_MEMORIES
+  const addAutoMemory = useChatStore(s => s.addAutoMemory)
   const athenaModel = useAthenaStore(s => s.model)
   const setAthenaModel = useAthenaStore(s => s.setModel)
   const thinkingMode = useAthenaStore(s => s.thinkingMode)
@@ -372,7 +389,6 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
 
   // Athena 任务与面板状态
   const [activeTask, setActiveTask] = useState<AthenaTaskType>('qa')
-  const [showAbilityPanel, setShowAbilityPanel] = useState(false)
   const [showMemoryPanel, setShowMemoryPanel] = useState(false)
   const [athenaStatus, setAthenaStatus] = useState<'idle' | 'thinking' | 'tasking'>('idle')
   const [showTaskForm, setShowTaskForm] = useState(false)
@@ -391,7 +407,6 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
   useEffect(() => {
     if (!visible) {
       setConvMenuOpen(false)
-      setShowAbilityPanel(false)
       setShowMemoryPanel(false)
       setShowTaskForm(false)
       return
@@ -400,8 +415,21 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
     return () => window.cancelAnimationFrame(frame)
   }, [visible])
 
+  // 打开会话菜单时把当前所在分组滚入视野，课程多时不用手动找。
+  useEffect(() => {
+    if (!convMenuOpen) return
+    const frame = window.requestAnimationFrame(() => {
+      convMenuRef.current?.querySelector<HTMLElement>('[data-active-group="true"]')
+        ?.scrollIntoView({ block: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [convMenuOpen])
+
   useEffect(() => {
     setEditingMessageId(null)
+    setAttachments([])
+    setActiveTask('qa')
+    setShowTaskForm(false)
   }, [currentId])
 
   const handleClosePanel = () => {
@@ -530,7 +558,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
   useEffect(() => cancelStreamFlush, [cancelStreamFlush])
 
   // 弹窗打开时启用全局高斯模糊层（位于侧边栏与卡片之下）
-  useGlobalBlur(showAbilityPanel || showMemoryPanel || showTaskForm)
+  useGlobalBlur(showMemoryPanel || showTaskForm)
 
   // 会话下拉：点击外部或 Esc 关闭
   useEffect(() => {
@@ -737,7 +765,14 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
         ? messages.findIndex(m => m.id === targetMessageId && m.role === 'user')
         : -1
       const editingTarget = editingTargetIndex >= 0 ? messages[editingTargetIndex] : null
-      const conversationId = useChatStore.getState().currentId!
+      const state = useChatStore.getState()
+      const conversationId = state.conversations.some(c => c.id === state.currentId)
+        ? state.currentId : state.createConversation(groupCourseId)
+      const conversation = useChatStore.getState().conversations.find(c => c.id === conversationId)!
+      // Capture ownership before async work; sidebar navigation cannot change this context.
+      const courseId = conversation.courseId ?? undefined
+      const rawText = useCourseStore.getState().courses.find(c => c.course.id === courseId)?.rawText ?? ''
+      const requestMemories = conversation.memories
 
       // 图片随消息一并发送给多模态模型
       const visibleAttachmentNames = activeAttachments.map(item => item.name).join('、')
@@ -762,17 +797,15 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
         content: m.content,
       }))
 
-      const courseId = editingTarget?.courseId ?? currentCourse?.id
-
       if (editingTarget) {
         updateMessageAndTruncateAfter(editingTarget.id, content, conversationId, images.length > 0 ? images : undefined)
       } else {
         // 添加用户消息
-        addMessage('user', content, courseId, images.length > 0 ? images : undefined)
+        addMessage('user', content, courseId, images.length > 0 ? images : undefined, conversationId)
       }
 
       // 添加空的 AI 消息，准备接收流式内容
-      const assistantId = addMessage('assistant', '', courseId)
+      const assistantId = addMessage('assistant', '', courseId, undefined, conversationId)
       streamBufferRef.current = ''
       setStreamingDraft({ id: assistantId, content: '' })
       shouldAutoScrollRef.current = true
@@ -783,9 +816,8 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
       let accumulated = ''
 
       try {
-        const charterMemories = memories.filter(m => m.type === 'charter').map(m => m.content)
-        const flowMemories = memories.filter(m => m.type === 'flow').map(m => m.content)
-        const abilityList = abilities.map(a => ({ name: a.name, description: a.description }))
+        const charterMemories = requestMemories.filter(m => m.type === 'charter').map(m => athenaText(m.content))
+        const flowMemories = requestMemories.filter(m => m.type === 'flow').map(m => athenaText(m.content))
 
         // For task types other than 'qa', use executeTask
         if (activeTask !== 'qa') {
@@ -798,7 +830,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
             scheduleStreamRender(assistantId, accumulated)
           }
         } else {
-          for await (const chunk of chatWithAthena(modelContent, rawText, history, abilityList, charterMemories, flowMemories, images, {
+          for await (const chunk of chatWithAthena(modelContent, rawText, history, charterMemories, flowMemories, images, {
             model: effectiveAthenaModel,
             thinkingMode,
             signal: controller.signal,
@@ -814,10 +846,9 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
         updateMessage(assistantId, finalContent, conversationId)
         if (accumulated) {
           // After receiving the full reply, auto-summarize insights (non-blocking)
-          summarizeAthenaInsights(modelContent, accumulated, abilities.map(a => a.name))
+          summarizeAthenaInsights(modelContent, accumulated)
             .then(insights => {
-              insights.newAbilities.forEach(a => addAutoAbility(a.name, a.description))
-              insights.newMemories.forEach(m => addAutoMemory(m))
+              insights.newMemories.forEach(m => addAutoMemory(conversationId, m))
             })
             .catch(() => {})
         }
@@ -838,7 +869,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
         setAthenaStatus('idle')
       }
     },
-    [input, messages, rawText, currentCourse, attachments, attachmentBusy, editingMessageId, activeTask, memories, abilities, effectiveAthenaModel, thinkingMode, addMessage, updateMessage, updateMessageAndTruncateAfter, setStreaming, addAutoAbility, addAutoMemory, scheduleStreamRender, cancelStreamFlush, t]
+    [input, messages, groupCourseId, attachments, attachmentBusy, editingMessageId, activeTask, effectiveAthenaModel, thinkingMode, addMessage, updateMessage, updateMessageAndTruncateAfter, setStreaming, addAutoMemory, scheduleStreamRender, cancelStreamFlush, t]
   )
 
   const handleRefreshUserMessage = useCallback((message: ChatMessage) => {
@@ -874,7 +905,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
     <div
       className={`${styles.container} ${styles.sideChat} ${isExpanded ? styles.expandedChat : ''}`}
       onKeyDown={event => {
-        if (event.key === 'Escape' && !event.nativeEvent.isComposing && !convMenuOpen && !showAbilityPanel && !showMemoryPanel && !showTaskForm) {
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing && !convMenuOpen && !showMemoryPanel && !showTaskForm) {
           event.preventDefault()
           event.stopPropagation()
           if (isExpanded) {
@@ -918,7 +949,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                     className={styles.convNew}
                     disabled={isStreaming}
                     onClick={() => {
-                      createConversation()
+                      createConversation(groupCourseId)
                       setConvMenuOpen(false)
                     }}
                   >
@@ -926,7 +957,32 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                     <span>{t('athena.newChat')}</span>
                   </button>
                   <div className={styles.convList}>
-                    {conversations.map(conv => (
+                    {conversationGroups.map(group => (
+                      <section key={group.courseId ?? '__general'}
+                        className={`${styles.convGroup} ${group.active ? styles.convGroupActive : ''}`}
+                        data-active-group={group.active ? 'true' : undefined}
+                        aria-label={`会话分组：${group.title}`}>
+                        <div className={styles.convGroupHeader}>
+                          <span className={styles.convGroupIcon} aria-hidden="true">{group.courseId ? <BookOpen size={13} strokeWidth={2} /> : <MessageCircle size={13} strokeWidth={2} />}</span>
+                          <span className={styles.convGroupName}>
+                            <span title={group.title}>{group.title}</span>
+                            {group.courseId && <em>{t('athena.groupScoped')}</em>}
+                          </span>
+                          <span className={styles.convGroupCount} aria-label={`${group.conversations.length} 个会话`}>{group.conversations.length}</span>
+                          <button type="button" className={styles.convGroupNew} disabled={isStreaming || attachmentBusy}
+                            title={t('athena.newChatInCourse').replace('{course}', group.title)}
+                            aria-label={t('athena.newChatInCourse').replace('{course}', group.title)}
+                            onClick={() => { createConversation(group.courseId); setConvMenuOpen(false) }}>
+                            <Plus size={13} strokeWidth={2.4} />
+                          </button>
+                        </div>
+                        <div className={styles.convGroupBody}>
+                        {group.conversations.length === 0 ? (
+                          <button type="button" className={styles.convEmptyRow} disabled={isStreaming || attachmentBusy}
+                            onClick={() => { createConversation(group.courseId); setConvMenuOpen(false) }}>
+                            <Plus size={12} strokeWidth={2.2} />{t('athena.newChat')}
+                          </button>
+                        ) : group.conversations.map(conv => (
                       <div
                         key={conv.id}
                         className={`${styles.convItem} ${conv.id === currentId ? styles.convItemActive : ''}`}
@@ -964,6 +1020,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                           }}
                         >
                           <span className={styles.convItemTitle}>
+                            {conv.id === currentId && <Check size={13} strokeWidth={2.6} className={styles.convItemCheck} aria-label={t('athena.currentConversation')} />}
                             {conv.title || t('athena.newChat')}
                           </span>
                           <span className={styles.convItemMeta}>
@@ -1002,6 +1059,9 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                         </button>
                       </div>
                     ))}
+                        </div>
+                      </section>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1011,7 +1071,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                 ? t('athena.thinking')
                 : currentCourse
                   ? t('athena.basedOn').replace('{course}', currentCourse.name)
-                  : t('athena.subtitle')}
+                  : groupCourseId ? '所属课程已删除，当前不读取课件' : '通用 / 历史未归组 · 不读取课程课件'}
             </p>
           </div>
         </div>
@@ -1028,7 +1088,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
           <button
             type="button"
             className={styles.headerBtn}
-            onClick={() => { createConversation(); setConvMenuOpen(false) }}
+            onClick={() => { createConversation(groupCourseId); setConvMenuOpen(false) }}
             disabled={isStreaming}
             title={t('athena.newChat')}
             aria-label={t('athena.newChat')}
@@ -1043,11 +1103,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
               </button>
             </div>
           )}
-          <button className={styles.headerBtn} onClick={() => setShowAbilityPanel(true)} title={t('athena.abilities')}>
-            <Zap size={16} strokeWidth={1.8} />
-            <span className={styles.headerBtnLabel}>{abilities.length}</span>
-          </button>
-          <button className={styles.headerBtn} onClick={() => setShowMemoryPanel(true)} title={t('athena.memories')}>
+          <button className={styles.headerBtn} onClick={() => { if (!currentConversation) createConversation(groupCourseId); setShowMemoryPanel(true) }} title={t('athena.memories')}>
             <Brain size={16} strokeWidth={1.8} />
             <span className={styles.headerBtnLabel}>{memories.length}</span>
           </button>
@@ -1371,28 +1427,6 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
         </div>
       </div>
 
-      {/* Ability Panel */}
-      {showAbilityPanel && (
-        <ModalPortal>
-        <div className={styles.modalOverlay} onClick={() => setShowAbilityPanel(false)}>
-          <div className={styles.modal} onClick={e => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div className={styles.modalTitle}>
-                <Zap size={18} strokeWidth={2} />
-                <h3>{t('athena.abilities')}</h3>
-              </div>
-              <button className={styles.modalClose} onClick={() => setShowAbilityPanel(false)}>
-                <X size={18} strokeWidth={2} />
-              </button>
-            </div>
-            <div className={styles.modalBody}>
-              <AbilityPanel />
-            </div>
-          </div>
-        </div>
-        </ModalPortal>
-      )}
-
       {/* Memory Panel */}
       {showMemoryPanel && (
         <ModalPortal>
@@ -1408,7 +1442,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
               </button>
             </div>
             <div className={styles.modalBody}>
-              <MemoryPanel />
+              <MemoryPanel key={currentId} conversationId={currentId} />
             </div>
           </div>
         </div>
@@ -1470,76 +1504,16 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
   )
 }
 
-/** 技能管理面板 */
-function AbilityPanel() {
-  const t = useT()
-  const abilities = useAthenaStore(s => s.abilities)
-  const addAbility = useAthenaStore(s => s.addAbility)
-  const removeAbility = useAthenaStore(s => s.removeAbility)
-  const [name, setName] = useState('')
-  const [desc, setDesc] = useState('')
-
-  return (
-    <div className={styles.panelContent}>
-      <div className={styles.addForm}>
-        <input
-          className={styles.panelInput}
-          placeholder={t('athena.abilityNamePlaceholder')}
-          value={name}
-          onChange={e => setName(e.target.value)}
-        />
-        <input
-          className={styles.panelInput}
-          placeholder={t('athena.abilityDescPlaceholder')}
-          value={desc}
-          onChange={e => setDesc(e.target.value)}
-        />
-        <button
-          className={styles.panelAddBtn}
-          onClick={() => {
-            if (name.trim() && desc.trim()) {
-              addAbility(name.trim(), desc.trim())
-              setName('')
-              setDesc('')
-            }
-          }}
-        >
-          <Plus size={16} strokeWidth={2} />
-          {t('athena.add')}
-        </button>
-      </div>
-      <div className={styles.itemList}>
-        {abilities.length === 0 ? (
-          <p className={styles.emptyHint}>{t('athena.noAbilitiesHint')}</p>
-        ) : (
-          abilities.map(a => (
-            <div key={a.id} className={styles.abilityItem}>
-              <div className={styles.abilityInfo}>
-                <span className={styles.abilityName}>{a.name}</span>
-                <span className={styles.abilityDesc}>{a.description}</span>
-                {a.autoGenerated && <span className={styles.autoTag}>{t('athena.autoTag')}</span>}
-              </div>
-              <button className={styles.itemRemoveBtn} onClick={() => removeAbility(a.id)}>
-                <Trash2 size={14} strokeWidth={1.8} />
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  )
-}
-
 /** 记忆管理面板 */
-function MemoryPanel() {
+function MemoryPanel({ conversationId }: { conversationId: string }) {
   const t = useT()
-  const memories = useAthenaStore(s => s.memories)
-  const addMemory = useAthenaStore(s => s.addMemory)
-  const removeMemory = useAthenaStore(s => s.removeMemory)
-  const updateMemory = useAthenaStore(s => s.updateMemory)
-  const clearFlowMemories = useAthenaStore(s => s.clearFlowMemories)
-  const exportAthena = useAthenaStore(s => s.exportAthena)
-  const importAthena = useAthenaStore(s => s.importAthena)
+  const memories = useChatStore(s => s.conversations.find(c => c.id === conversationId)?.memories ?? EMPTY_CONVERSATION_MEMORIES)
+  const addMemory = useChatStore(s => s.addMemory)
+  const removeMemory = useChatStore(s => s.removeMemory)
+  const updateMemory = useChatStore(s => s.updateMemory)
+  const clearFlowMemories = useChatStore(s => s.clearFlowMemories)
+  const exportAthena = useChatStore(s => s.exportMemories)
+  const importAthena = useChatStore(s => s.importMemories)
   const [newCharter, setNewCharter] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -1549,7 +1523,7 @@ function MemoryPanel() {
   const flowMemories = memories.filter(m => m.type === 'flow')
 
   const handleExport = () => {
-    const data = exportAthena()
+    const data = exportAthena(conversationId)
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1566,7 +1540,7 @@ function MemoryPanel() {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string)
-        importAthena(data)
+        importAthena(conversationId, data)
         alert(t('athena.importSuccess'))
       } catch {
         alert(t('dashboard.importFailedFormat'))
@@ -1578,6 +1552,7 @@ function MemoryPanel() {
 
   return (
     <div className={styles.panelContent}>
+      <p className={styles.memoryHint}>仅当前会话使用这些记忆；其他会话不会读取。导入、导出和清空也只作用于当前会话。旧版全局记忆保留在本地归档中，不会自动混入。</p>
       {/* Export / Import */}
       <div className={styles.dataActions}>
         <button className={styles.dataBtn} onClick={handleExport}>
@@ -1611,7 +1586,7 @@ function MemoryPanel() {
             className={styles.panelAddBtn}
             onClick={() => {
               if (newCharter.trim()) {
-                addMemory('charter', newCharter.trim(), 'custom')
+                addMemory(conversationId, 'charter', newCharter.trim(), 'custom')
                 setNewCharter('')
               }
             }}
@@ -1632,19 +1607,19 @@ function MemoryPanel() {
                     rows={3}
                   />
                   <div className={styles.editActions}>
-                    <button onClick={() => { updateMemory(m.id, editText); setEditingId(null) }}>{t('common.save')}</button>
+                    <button onClick={() => { updateMemory(conversationId, m.id, editText); setEditingId(null) }}>{t('common.save')}</button>
                     <button onClick={() => setEditingId(null)}>{t('common.cancel')}</button>
                   </div>
                 </div>
               ) : (
                 <>
-                  <span className={styles.memoryCategory}>{m.category || t('athena.memCategoryCustom')}</span>
-                  <p className={styles.memoryContent}>{m.content}</p>
+                  <span className={styles.memoryCategory}>{athenaText(m.category) || t('athena.memCategoryCustom')}</span>
+                  <p className={styles.memoryContent}>{athenaText(m.content)}</p>
                   <div className={styles.memoryActions}>
-                    <button onClick={() => { setEditingId(m.id); setEditText(m.content) }}>
+                    <button onClick={() => { setEditingId(m.id); setEditText(athenaText(m.content)) }}>
                       {t('athena.edit')}
                     </button>
-                    <button onClick={() => removeMemory(m.id)}>
+                    <button onClick={() => removeMemory(conversationId, m.id)}>
                       <Trash2 size={12} strokeWidth={1.8} />
                     </button>
                   </div>
@@ -1662,7 +1637,7 @@ function MemoryPanel() {
           <h4>{t('athena.flowMemory')}</h4>
           <span className={styles.memoryCount}>{flowMemories.length}</span>
           {flowMemories.length > 0 && (
-            <button className={styles.clearFlowBtn} onClick={clearFlowMemories}>
+            <button className={styles.clearFlowBtn} onClick={() => clearFlowMemories(conversationId)}>
               {t('wrongbook.clear')}
             </button>
           )}
@@ -1674,9 +1649,9 @@ function MemoryPanel() {
           ) : (
             flowMemories.map(m => (
               <div key={m.id} className={styles.memoryItem}>
-                <p className={styles.memoryContent}>{m.content}</p>
+                <p className={styles.memoryContent}>{athenaText(m.content)}</p>
                 <div className={styles.memoryActions}>
-                  <button onClick={() => removeMemory(m.id)}>
+                  <button onClick={() => removeMemory(conversationId, m.id)}>
                     <Trash2 size={12} strokeWidth={1.8} />
                   </button>
                 </div>

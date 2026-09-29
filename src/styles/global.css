@@ -667,6 +667,46 @@ button[class*="quizNavBtn"]:not([class*="Disabled"]) {
   color: var(--text-secondary);
 }
 
+/* Shared by lesson Markdown, Athena replies and SVG source disclosure. */
+.chillpassCodeBlock {
+  min-width: 0;
+  margin: 12px 0;
+}
+.chillpassCodeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid rgba(128, 128, 128, .22);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: rgba(128, 128, 128, .08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  user-select: none;
+}
+.chillpassCodeHeader > span { min-width: 0; overflow-wrap: anywhere; }
+.chillpassCodeHeader > button {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.chillpassCodeHeader > button:hover { background: rgba(128, 128, 128, .15); }
+.chillpassCodeHeader > button:focus-visible { outline: 2px solid var(--accent-text, #80aaff); outline-offset: 2px; }
+.chillpassCodeHeader > button:disabled { cursor: wait; }
+.chillpassCodeBlock.chillpassCodeBlock > pre {
+  margin: 0;
+  border-radius: 0 0 10px 10px;
+  overflow-x: auto;
+}
+
 .svgBlockSource code {
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
   white-space: pre;

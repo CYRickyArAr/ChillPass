@@ -26,6 +26,7 @@ import {
   BUILTIN_MODELS,
   describeModel,
   fetchProviderModels,
+  hasModelDescription,
 } from '@services/modelCatalog'
 import { useTokenStore, dateKey } from '@stores/tokenStore'
 import { useT } from '../../i18n'
@@ -41,7 +42,9 @@ export default function ApiSettings() {
   const dailyUsage = useTokenStore(s => s.daily)
   const resetStats = useTokenStore(s => s.resetStats)
 
-  const provider = useSettingsStore(s => s.provider)
+  const activeProvider = useSettingsStore(s => s.provider)
+  // The selected settings tab is only an editor, not the provider used for requests.
+  const [provider, setEditingProvider] = useState<AIProvider>(activeProvider)
   const providerConnections = useSettingsStore(s => s.providerConnections)
   const customProviderIds = useSettingsStore(s => s.customProviderIds)
   const storeModel = useSettingsStore(s => s.model)
@@ -49,7 +52,6 @@ export default function ApiSettings() {
   const setFastResponses = useSettingsStore(s => s.setFastResponses)
   const economyLessons = useSettingsStore(s => s.economyLessons)
   const setEconomyLessons = useSettingsStore(s => s.setEconomyLessons)
-  const setProvider = useSettingsStore(s => s.setProvider)
   const setProviderConnection = useSettingsStore(s => s.setProviderConnection)
   const addCustomProvider = useSettingsStore(s => s.addCustomProvider)
   const removeCustomProvider = useSettingsStore(s => s.removeCustomProvider)
@@ -66,12 +68,13 @@ export default function ApiSettings() {
   const [customUsageEnabled, setCustomUsageEnabled] = useState(activeConnection.usageQuery?.enabled === true)
   const [customUsageScript, setCustomUsageScript] = useState(activeConnection.usageQuery?.script || DEFAULT_CUSTOM_USAGE_SCRIPT)
   const [customUsageOpen, setCustomUsageOpen] = useState(activeConnection.usageQuery?.enabled === true)
-  const [model, setModelInput] = useState(storeModel)
+  const [model, setModelInput] = useState(activeConnection.model || storeModel)
   const [showKey, setShowKey] = useState(false)
   const [saved, setSaved] = useState(false)
 
   // ── 模型列表：实时拉取 + 悬停说明 ──
-  const [liveModels, setLiveModels] = useState<string[] | null>(null)
+  const [liveModels, setLiveModels] = useState<string[] | null>(activeConnection.availableModels ?? null)
+  const fetchRequestIdRef = useRef(0)
   const [fetching, setFetching] = useState(false)
   const [fetchError, setFetchError] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -89,13 +92,9 @@ export default function ApiSettings() {
     setCustomUsageOpen(next.usageQuery?.enabled === true)
   }, [provider, providerConnections, customProviderIds])
 
+  // 切换配置页厂商时读取其上次保存的列表，不自动请求远端。
   useEffect(() => {
-    setModelInput(storeModel)
-  }, [storeModel])
-
-  // 切换提供商：模型切换为该提供商默认模型，并清空上一个提供商的实时列表
-  useEffect(() => {
-    setLiveModels(null)
+    setLiveModels(getProviderConnection(provider).availableModels ?? null)
     setFetchError('')
   }, [provider])
 
@@ -111,18 +110,20 @@ export default function ApiSettings() {
       setFetchError(t('api.customBaseUrlRequired'))
       return
     }
+    const requestId = ++fetchRequestIdRef.current
     setFetching(true)
     setFetchError('')
     try {
       const ids = await fetchProviderModels(provider, key, {
         customBaseUrl: baseUrlForFetch,
       })
+      if (requestId !== fetchRequestIdRef.current) return
       setLiveModels(ids)
       if (ids.length > 0 && !ids.includes(model)) {
         setModelInput(ids[0])
       }
     } catch (err) {
-      setLiveModels(null)
+      if (requestId !== fetchRequestIdRef.current) return
       setFetchError(
         t('api.modelRefreshFailed').replace(
           '{msg}',
@@ -130,33 +131,9 @@ export default function ApiSettings() {
         ),
       )
     } finally {
-      setFetching(false)
+      if (requestId === fetchRequestIdRef.current) setFetching(false)
     }
   }
-
-  // 已保存过 Key 时自动拉取一次，省去用户手动点击
-  useEffect(() => {
-    if (!storedKey.trim()) return
-    if (!activeConnection.baseUrl.trim()) return
-    let cancelled = false
-    setFetching(true)
-    setFetchError('')
-    fetchProviderModels(provider, storedKey, { customBaseUrl: activeConnection.baseUrl })
-      .then(ids => {
-        if (!cancelled) setLiveModels(ids)
-      })
-      .catch(() => {
-        // 自动拉取失败不打扰用户，仅保留内置列表
-        if (!cancelled) setLiveModels(null)
-      })
-      .finally(() => {
-        if (!cancelled) setFetching(false)
-      })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, storedKey, activeConnection.baseUrl])
 
   // 点击外部或按 Esc 关闭下拉
   useEffect(() => {
@@ -191,11 +168,16 @@ export default function ApiSettings() {
   // 悬停说明：优先显示光标停留的选项，否则显示当前所选模型
   const tipModel = hoveredModel ?? model
 
-  // 切换提供商：模型自动切换为该提供商的默认模型
+  // Only change which provider's configuration is being edited.
   const handleProviderChange = (next: AIProvider) => {
     if (next === provider) return
-    setProvider(next)
-    setModelInput(PROVIDER_DEFAULT_MODEL[next] ?? PROVIDER_DEFAULT_MODEL.custom)
+    fetchRequestIdRef.current += 1
+    setFetching(false)
+    setEditingProvider(next)
+    const connection = getProviderConnection(next)
+    setModelInput(connection.model || (next === activeProvider ? storeModel : PROVIDER_DEFAULT_MODEL[next] ?? PROVIDER_DEFAULT_MODEL.custom))
+    setMenuOpen(false)
+    setSaved(false)
   }
 
   const handleSave = () => {
@@ -203,26 +185,28 @@ export default function ApiSettings() {
       name: isCustom ? (providerName.trim() || t('api.providerCustom')) : activeConnection.name,
       baseUrl: baseUrl.trim(),
       apiKey: apiKey.trim(),
+      model,
+      availableModels: liveModels ?? activeConnection.availableModels,
       usageQuery: {
         enabled: customUsageEnabled,
         script: customUsageScript.trim() || DEFAULT_CUSTOM_USAGE_SCRIPT,
       },
     })
-    setModel(model)
+    if (provider === useSettingsStore.getState().provider) setModel(model)
     setSaved(true)
     window.setTimeout(() => setSaved(false), 2000)
   }
 
   const handleAddCustomProvider = () => {
     const id = addCustomProvider()
-    setProvider(id)
-    setModelInput(PROVIDER_DEFAULT_MODEL.custom)
+    handleProviderChange(id)
   }
 
   const handleRemoveCustomProvider = (id: AIProvider) => {
     const name = getProviderDisplayName(id, providerState)
     if (!window.confirm(t('api.providerDeleteConfirm').replace('{name}', name))) return
     removeCustomProvider(id)
+    if (provider === id) handleProviderChange(useSettingsStore.getState().provider)
   }
 
   const providerItems = [
@@ -400,7 +384,7 @@ export default function ApiSettings() {
 
           <div className={styles.modelSelect} ref={modelBoxRef}>
             {/* 悬停说明面板：光标停在选项或当前模型上时显示 */}
-            {tipModel && (
+            {tipModel && hasModelDescription(tipModel) && (
               <div className={styles.modelTip} role="tooltip">
                 {describeModel(tipModel)}
               </div>
@@ -466,7 +450,9 @@ export default function ApiSettings() {
             <p className={styles.hint}>{t('api.modelBuiltinHint')}</p>
           )}
 
-          <p className={styles.hint}>{t('api.modelHoverHint')}</p>
+          {modelOptions.some(hasModelDescription) && (
+            <p className={styles.hint}>{t('api.modelHoverHint')}</p>
+          )}
         </div>
 
         <details

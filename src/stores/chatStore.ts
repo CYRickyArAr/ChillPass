@@ -2,62 +2,80 @@ import { create } from 'zustand'
 import { persist, type PersistStorage } from 'zustand/middleware'
 import { nanoid } from 'nanoid'
 import { useCourseStore } from './courseStore'
+import { createConversationMemories } from './athenaStore'
+import { athenaText } from '../utils/athenaText'
 import { learningDataStorage } from '../services/learningDataStorage'
-import type { ChatMessage } from '@types/index'
+import type { ChatMessage, AthenaMemory, MemoryType } from '@types/index'
 
-/** 一次会话（一组消息） */
 export interface Conversation {
   id: string
   title: string
+  /** null = general/legacy unassigned. Never fall back to the currently open course. */
+  courseId: string | null
+  courseName?: string
+  memories: AthenaMemory[]
   messages: ChatMessage[]
   createdAt: number
   updatedAt: number
 }
 
-/** 空数组常量：保证选择器返回稳定引用，避免无谓重渲染 */
 const EMPTY_MESSAGES: ChatMessage[] = []
-
-/** 由首条用户消息推导会话标题 */
+export const EMPTY_CONVERSATION_MEMORIES: AthenaMemory[] = []
 function deriveTitle(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim()
-  if (!clean) return ''
   return clean.length > 24 ? `${clean.slice(0, 24)}…` : clean
 }
-
-/** 创建空会话 */
-function makeConversation(): Conversation {
+function makeConversation(courseId: string | null = useCourseStore.getState().currentCourseId || null): Conversation {
   const now = Date.now()
-  const state = useCourseStore.getState()
-  const title = state.courses.find(c => c.course.id === state.currentCourseId)?.course.name || '新会话'
-  return { id: nanoid(), title, messages: [], createdAt: now, updatedAt: now }
+  const courseName = useCourseStore.getState().courses.find(c => c.course.id === courseId)?.course.name
+  return { id: nanoid(), title: '新会话', courseId, courseName, memories: createConversationMemories(), messages: [], createdAt: now, updatedAt: now }
+}
+
+/** v0/v1 migration: preserve every conversation/message; only infer unambiguous course IDs.
+ * Mixed-course and unstamped histories stay unassigned, never guessed from the current course/title.
+ * Old global memories remain archived in athena-storage, not copied into unrelated sessions.
+ */
+export function migrateChat(persisted: unknown): { conversations: Conversation[]; currentId: string } {
+  const old = persisted as { conversations?: Conversation[]; messages?: ChatMessage[]; currentId?: string } | undefined
+  const existing = Array.isArray(old?.conversations) ? old.conversations
+    : old?.messages?.length ? [{ ...makeConversation(null), messages: old.messages, title: deriveTitle(old.messages.find(m => m.role === 'user')?.content || '') }] : []
+  const conversations = existing.map(conversation => {
+    const ids = new Set(conversation.messages.map(message => message.courseId).filter((id): id is string => typeof id === 'string' && Boolean(id)))
+    const courseId = typeof conversation.courseId === 'string' ? conversation.courseId : ids.size === 1 ? [...ids][0] : null
+    return {
+      ...conversation, courseId,
+      courseName: conversation.courseName || useCourseStore.getState().courses.find(c => c.course.id === courseId)?.course.name,
+      memories: Array.isArray(conversation.memories) ? conversation.memories : createConversationMemories(),
+    }
+  })
+  return { conversations, currentId: conversations.some(c => c.id === old?.currentId) ? old!.currentId! : conversations[0]?.id || '' }
 }
 
 interface ChatState {
   conversations: Conversation[]
   currentId: string
   isStreaming: boolean
-
-  /** 当前会话的消息（组件通过选择器读取，引用稳定） */
   getMessages: () => ChatMessage[]
-  addMessage: (role: 'user' | 'assistant', content: string, courseId?: string, images?: string[]) => string
-  /** 可显式指定会话，避免流式回复在切换会话后写入错误位置。 */
+  addMessage: (role: 'user' | 'assistant', content: string, courseId?: string, images?: string[], conversationId?: string) => string
   updateMessage: (id: string, content: string, conversationId?: string) => void
-  /** 更新某条用户消息，并删除其后的旧回复，用于“编辑重发”。 */
   updateMessageAndTruncateAfter: (id: string, content: string, conversationId?: string, images?: string[]) => void
   setStreaming: (streaming: boolean) => void
-  /** 清空当前会话的消息 */
   clearMessages: () => void
-  /** 新建会话并切换过去，返回新会话 id */
-  createConversation: () => string
+  createConversation: (courseId?: string | null) => string
   renameConversation: (id: string, title: string) => void
-  /** 切换会话 */
   switchConversation: (id: string) => void
-  /** 删除会话（删空后自动补一个空会话） */
   deleteConversation: (id: string) => void
+  addMemory: (conversationId: string, type: MemoryType, content: string, category?: string) => void
+  addAutoMemory: (conversationId: string, content: unknown) => void
+  removeMemory: (conversationId: string, id: string) => void
+  updateMemory: (conversationId: string, id: string, content: string) => void
+  clearFlowMemories: (conversationId: string) => void
+  exportMemories: (conversationId: string) => { version: string; exportedAt: number; memories: AthenaMemory[] }
+  importMemories: (conversationId: string, data: unknown) => void
 }
 
 type SavedChat = Pick<ChatState, 'conversations' | 'currentId'>
-// 切换会话只写一个小 ID，不重复序列化全部消息和图片。
+// Switching a conversation writes only a small ID, not all messages/images.
 let savedConversations: Conversation[] | undefined
 const chatStorage: PersistStorage<SavedChat> = {
   getItem: name => {
@@ -65,9 +83,7 @@ const chatStorage: PersistStorage<SavedChat> = {
     if (!raw) return null
     const saved = JSON.parse(raw)
     const currentId = learningDataStorage.getItem(`${name}-current`) as string | null
-    if (currentId && saved.state?.conversations?.some((c: Conversation) => c.id === currentId)) {
-      saved.state.currentId = currentId
-    }
+    if (currentId && saved.state?.conversations?.some((c: Conversation) => c.id === currentId)) saved.state.currentId = currentId
     savedConversations = saved.state?.conversations
     return saved
   },
@@ -88,142 +104,101 @@ const chatStorage: PersistStorage<SavedChat> = {
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
-      conversations: [],
-      currentId: '',
-      isStreaming: false,
-
-      getMessages: () => {
-        const { conversations, currentId } = get()
-        return conversations.find(c => c.id === currentId)?.messages ?? EMPTY_MESSAGES
-      },
-
-      addMessage: (role, content, courseId, images) => {
+      conversations: [], currentId: '', isStreaming: false,
+      getMessages: () => get().conversations.find(c => c.id === get().currentId)?.messages ?? EMPTY_MESSAGES,
+      addMessage: (role, content, _courseId, images, conversationId) => {
         const id = nanoid()
-        const message: ChatMessage = {
-          id,
-          role,
-          content,
-          timestamp: Date.now(),
-          courseId,
-          ...(images && images.length > 0 ? { images } : {}),
-        }
         set(state => {
-          // 兜底：尚无任何会话时自动建立一个
-          const conversations = state.conversations.length > 0
-            ? state.conversations
-            : [makeConversation()]
-          const currentId = state.currentId || conversations[0].id
-
+          let conversations = state.conversations
+          let target = conversations.find(c => c.id === (conversationId ?? state.currentId))
+          if (!target) {
+            if (conversationId) return state // Deleted target: never resurrect it or write into another session.
+            target = makeConversation()
+            conversations = [target, ...conversations]
+          }
+          const targetId = target.id
+          const message: ChatMessage = { id, role, content, timestamp: Date.now(), courseId: target.courseId ?? undefined, ...(images?.length ? { images } : {}) }
           return {
-            conversations: conversations.map(c => {
-              if (c.id !== currentId) return c
-              const title = c.title || makeConversation().title
-              return {
-                ...c,
-                title,
-                messages: [...c.messages, message],
-                updatedAt: Date.now(),
-              }
+            conversations: conversations.map(c => c.id !== targetId ? c : {
+              ...c, title: role === 'user' && c.title === '新会话' ? deriveTitle(content) || c.title : c.title,
+              messages: [...c.messages, message], updatedAt: Date.now(),
             }),
-            currentId,
+            currentId: conversationId ? state.currentId : targetId,
           }
         })
         return id
       },
-
-      updateMessage: (id, content, conversationId) => {
-        set(state => ({
-          conversations: state.conversations.map(c =>
-            c.id === (conversationId ?? state.currentId)
-              ? {
-                  ...c,
-                  messages: c.messages.map(m => (m.id === id ? { ...m, content } : m)),
-                  updatedAt: Date.now(),
-                }
-              : c,
-          ),
-        }))
-      },
-
-      updateMessageAndTruncateAfter: (id, content, conversationId, images) => {
-        set(state => ({
-          conversations: state.conversations.map(c => {
-            if (c.id !== (conversationId ?? state.currentId)) return c
-            const index = c.messages.findIndex(m => m.id === id)
-            if (index < 0) return c
-            const messages = c.messages.slice(0, index + 1)
-            messages[index] = {
-              ...messages[index],
-              content,
-              ...(images && images.length > 0 ? { images } : { images: undefined }),
-            }
-            return {
-              ...c,
-              messages,
-              updatedAt: Date.now(),
-            }
-          }),
-        }))
-      },
-
-      setStreaming: (streaming) => set({ isStreaming: streaming }),
-
-      clearMessages: () => {
-        set(state => ({
-          conversations: state.conversations.map(c =>
-            c.id === state.currentId ? { ...c, messages: [], updatedAt: Date.now() } : c,
-          ),
-        }))
-      },
-
-      createConversation: () => {
-        const conv = makeConversation()
-        set(state => ({
-          conversations: [conv, ...state.conversations],
-          currentId: conv.id,
-        }))
+      updateMessage: (id, content, conversationId) => set(state => ({
+        conversations: state.conversations.map(c => c.id === (conversationId ?? state.currentId)
+          ? { ...c, messages: c.messages.map(m => m.id === id ? { ...m, content } : m), updatedAt: Date.now() } : c),
+      })),
+      updateMessageAndTruncateAfter: (id, content, conversationId, images) => set(state => ({
+        conversations: state.conversations.map(c => {
+          if (c.id !== (conversationId ?? state.currentId)) return c
+          const index = c.messages.findIndex(m => m.id === id)
+          if (index < 0) return c
+          const messages = c.messages.slice(0, index + 1)
+          messages[index] = { ...messages[index], content, images: images?.length ? images : undefined }
+          return { ...c, messages, updatedAt: Date.now() }
+        }),
+      })),
+      setStreaming: (isStreaming) => set({ isStreaming }),
+      clearMessages: () => set(state => ({ conversations: state.conversations.map(c => c.id === state.currentId ? { ...c, messages: [], updatedAt: Date.now() } : c) })),
+      createConversation: (courseId) => {
+        if (get().isStreaming) return get().currentId
+        const conv = makeConversation(courseId)
+        set(state => ({ conversations: [conv, ...state.conversations], currentId: conv.id }))
         return conv.id
       },
-
       renameConversation: (id, title) => {
-        const name = title.trim()
-        if (!name) return
-        set(state => ({ conversations: state.conversations.map(c =>
-          c.id === id ? { ...c, title: name, updatedAt: Date.now() } : c,
-        ) }))
+        if (!title.trim()) return
+        set(state => ({ conversations: state.conversations.map(c => c.id === id ? { ...c, title: title.trim(), updatedAt: Date.now() } : c) }))
       },
-
       switchConversation: (id) => {
-        if (!get().conversations.some(c => c.id === id)) return
+        if (get().isStreaming || !get().conversations.some(c => c.id === id)) return
         set({ currentId: id })
       },
-
       deleteConversation: (id) => {
+        if (get().isStreaming) return
         set(state => {
+          const removed = state.conversations.find(c => c.id === id)
+          if (!removed) return state
           const remaining = state.conversations.filter(c => c.id !== id)
-          if (remaining.length === 0) {
-            const fresh = makeConversation()
-            return { conversations: [fresh], currentId: fresh.id }
-          }
-          const currentId = state.currentId === id ? remaining[0].id : state.currentId
-          return { conversations: remaining, currentId }
+          if (state.currentId !== id) return { conversations: remaining }
+          const sibling = remaining.find(c => c.courseId === removed.courseId)
+          if (sibling) return { conversations: remaining, currentId: sibling.id }
+          const fresh = makeConversation(removed.courseId)
+          return { conversations: [fresh, ...remaining], currentId: fresh.id }
         })
       },
-    }),
-    {
-      name: 'chillpass-chat',
-      storage: chatStorage,
-      // v1：旧数据只有单个 messages 数组，迁移为「一个会话」
-      version: 1,
-      migrate: (persisted) => {
-        const legacy = (persisted as { messages?: ChatMessage[] } | undefined)?.messages ?? []
-        const conv = makeConversation()
-        conv.messages = legacy
-        conv.title = deriveTitle(legacy.find(m => m.role === 'user')?.content ?? '')
-        return { conversations: [conv], currentId: conv.id }
+      addMemory: (conversationId, type, content, category) => {
+        const text = athenaText(content)
+        if (!text.trim()) return
+        const memory: AthenaMemory = { id: nanoid(), type, content: text, category, createdAt: Date.now(), updatedAt: Date.now() }
+        set(state => ({ conversations: state.conversations.map(c => c.id === conversationId ? { ...c, memories: [...c.memories, memory] } : c) }))
       },
-      // 只持久化会话与当前会话 id（isStreaming 刷新后总是 false）
-      partialize: (state) => ({ conversations: state.conversations, currentId: state.currentId }),
+      addAutoMemory: (conversationId, content) => {
+        const text = athenaText(content)
+        const conversation = get().conversations.find(c => c.id === conversationId)
+        if (!conversation || !text.trim() || conversation.memories.some(m => m.type === 'flow' && athenaText(m.content) === text)) return
+        get().addMemory(conversationId, 'flow', text)
+      },
+      removeMemory: (conversationId, id) => set(state => ({ conversations: state.conversations.map(c => c.id === conversationId ? { ...c, memories: c.memories.filter(m => m.id !== id) } : c) })),
+      updateMemory: (conversationId, id, content) => set(state => ({ conversations: state.conversations.map(c => c.id === conversationId ? { ...c, memories: c.memories.map(m => m.id === id ? { ...m, content: athenaText(content), updatedAt: Date.now() } : m) } : c) })),
+      clearFlowMemories: (conversationId) => set(state => ({ conversations: state.conversations.map(c => c.id === conversationId ? { ...c, memories: c.memories.filter(m => m.type === 'charter') } : c) })),
+      exportMemories: (conversationId) => ({ version: '2.0', exportedAt: Date.now(), memories: get().conversations.find(c => c.id === conversationId)?.memories ?? [] }),
+      importMemories: (conversationId, data) => {
+        const imported = (data as { memories?: unknown } | null)?.memories
+        if (!Array.isArray(imported)) throw new Error('记忆格式不正确')
+        const memories: AthenaMemory[] = imported.map(value => {
+          if (!value || typeof value !== 'object' || !['charter', 'flow'].includes(value.type) || value.content == null) throw new Error('记忆格式不正确')
+          return { ...value, id: nanoid(), content: athenaText(value.content), category: athenaText(value.category), createdAt: Number(value.createdAt) || Date.now(), updatedAt: Date.now() }
+        })
+        set(state => ({ conversations: state.conversations.map(c => c.id === conversationId ? { ...c, memories } : c) }))
+      },
+    }),
+    { name: 'chillpass-chat', storage: chatStorage, version: 2, migrate: migrateChat,
+      partialize: state => ({ conversations: state.conversations, currentId: state.currentId }),
     },
   ),
 )

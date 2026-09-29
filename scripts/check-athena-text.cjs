@@ -1,0 +1,42 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const ts = require('typescript');
+const root = path.resolve(__dirname, '..');
+function load(file, imports = require) {
+  const context = { exports: {}, require: imports, console };
+  const source = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  vm.runInNewContext(source, context);
+  return context.exports;
+}
+const text = load('src/utils/athenaText.ts');
+const { athenaText } = text;
+const record = { content: '中文偏好', details: ['公式', '简洁'] };
+assert.deepEqual(JSON.parse(athenaText(record)), record);
+assert.equal(athenaText('原始文本'), '原始文本');
+assert.equal(athenaText(null), '');
+assert.equal(athenaText(42), '42');
+const { useAthenaStore } = load('src/stores/athenaStore.ts', id => {
+  if (id.endsWith('/athenaText')) return text;
+  if (id.endsWith('/learningDataStorage')) return { learningDataStorage: { getItem: () => null, setItem() {}, removeItem() {} } };
+  return require(id);
+});
+const store = () => useAthenaStore.getState();
+store().addAutoMemory(record);
+assert.equal(typeof store().memories.at(-1).content, 'string');
+assert.deepEqual(JSON.parse(store().memories.at(-1).content), record);
+const count = store().memories.length;
+store().addAutoMemory(record);
+store().addAutoMemory(null);
+assert.equal(store().memories.length, count);
+useAthenaStore.setState({ memories: [{ id: 'legacy', type: 'flow', content: record }] });
+store().addAutoMemory(record);
+assert.equal(store().memories.length, 1);
+assert.equal(store().memories[0].content, record, 'Legacy record must not be rewritten');
+assert.equal(store().addAutoAbility, undefined);
+const legacyAbilities = [{ id: 'old', name: '旧技能', description: '仅兼容归档', createdAt: 1 }];
+useAthenaStore.setState({ abilities: legacyAbilities });
+store().addAutoMemory('新记忆');
+assert.deepEqual(store().exportAthena().abilities, legacyAbilities);
+console.log('PASS Athena structured text, memory ingestion, duplicate prevention and inactive legacy skill archive');

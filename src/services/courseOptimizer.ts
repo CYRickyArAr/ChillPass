@@ -198,19 +198,6 @@ async function runCourseOptimization(courseId: string, jobId: string): Promise<v
   }
 }
 
-export function startBatchCourseOptimization(courseId: string): string | null {
-  const bundle = getCourseBundle(courseId)
-  if (!bundle || bundle.generatingLessons) return null
-  const jobId = useCourseStore.getState().beginOptimization(
-    courseId,
-    'batch',
-    undefined,
-    sourceFingerprint(bundle.rawText),
-  )
-  if (jobId) void runCourseOptimization(courseId, jobId)
-  return jobId
-}
-
 export async function rebuildCourseLessonStructure(courseId: string): Promise<{
   before: number
   after: number

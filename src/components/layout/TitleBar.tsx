@@ -44,8 +44,8 @@ export default function TitleBar() {
   const setModel = useSettingsStore(s => s.setModel)
   const t = useT()
 
-  // 浏览器模式下隐藏窗口控制按钮
-  const isBrowser = window.electronAPI?.platform === 'browser'
+  // Desktop uses native Windows window controls; avoid a second set of traffic lights.
+  const isBrowser = window.electronAPI?.platform === 'browser' || Boolean(window.chillpassDesktop)
 
   useEffect(() => {
     // 获取初始最大化状态
@@ -92,7 +92,7 @@ export default function TitleBar() {
   const handleProviderChange = (next: AIProvider) => {
     if (next !== provider) {
       setProvider(next)
-      setModel(PROVIDER_DEFAULT_MODEL[next] ?? PROVIDER_DEFAULT_MODEL.custom)
+      setModel(getProviderConnection(next).model || PROVIDER_DEFAULT_MODEL[next] || PROVIDER_DEFAULT_MODEL.custom)
     }
     setProviderMenuOpen(false)
   }

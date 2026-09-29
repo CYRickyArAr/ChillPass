@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, CheckCircle, PlayCircle, Upload, Loader, FileText, ChevronDown, ChevronRight, RefreshCw, ShieldCheck, CircleStop, Play } from 'lucide-react'
+import { AlertCircle, CheckCircle, PlayCircle, Upload, Loader, FileText, ChevronDown, ChevronRight, CircleStop, Play } from 'lucide-react'
 import { useCourseStore, useCurrentBundle } from '@stores/courseStore'
 import { cancelLessonGeneration, generateAllLessonsInBackground } from '@services/lessonGenerator'
-import { cancelCourseOptimization, rebuildCourseLessonStructure, startBatchCourseOptimization } from '@services/courseOptimizer'
+import { cancelCourseOptimization, rebuildCourseLessonStructure } from '@services/courseOptimizer'
 import { useT } from '../i18n'
 import type { TranslationKey } from '../i18n'
 import type { Lesson, Priority } from '@types/index'
@@ -101,7 +101,6 @@ export default function LessonPathPage() {
   const { canRetry: canRetryGeneration, pending: pendingGeneration } = getGenerationRecovery(bundle)
   const optimizationJob = bundle?.optimizationJob
   const optimizationActive = optimizationJob?.status === 'running' || optimizationJob?.status === 'paused'
-  const [showBatchConfirm, setShowBatchConfirm] = useState(false)
   const [showRebuildConfirm, setShowRebuildConfirm] = useState(false)
   const [showClearCompletedConfirm, setShowClearCompletedConfirm] = useState(false)
   const [rebuildingStructure, setRebuildingStructure] = useState(false)
@@ -258,13 +257,6 @@ export default function LessonPathPage() {
     navigate(`/lessons/${lesson.id}`)
   }
 
-  const handleBatchRegenerate = () => {
-    if (!course || optimizationActive || generatingLessons) return
-    setShowBatchConfirm(false)
-    setClearCompletedResult(null)
-    startBatchCourseOptimization(course.id)
-  }
-
   const handleRebuildStructure = async () => {
     if (!course || optimizationActive || generatingLessons || rebuildingStructure) return
     setShowRebuildConfirm(false)
@@ -385,35 +377,20 @@ export default function LessonPathPage() {
               type="button"
               className={styles.batchButton}
               disabled={optimizationActive || generatingLessons || rebuildingStructure}
-            onClick={() => {
-              setShowBatchConfirm(true)
-              setShowRebuildConfirm(false)
-              setShowClearCompletedConfirm(false)
-            }}
-          >
-            <RefreshCw size={15} strokeWidth={2} />
-            <span>{t('lessons.batchRegenerate')}</span>
+              onClick={() => {
+                setShowRebuildConfirm(true)
+                setShowClearCompletedConfirm(false)
+              }}
+            >
+              {rebuildingStructure ? <Loader size={15} strokeWidth={2} /> : <FileText size={15} strokeWidth={2} />}
+              <span>{t('lessons.rebuildStructure')}</span>
             </button>
-            <button
-              type="button"
-              className={styles.batchButton}
-              disabled={optimizationActive || generatingLessons || rebuildingStructure}
-            onClick={() => {
-              setShowRebuildConfirm(true)
-              setShowBatchConfirm(false)
-              setShowClearCompletedConfirm(false)
-            }}
-          >
-            {rebuildingStructure ? <Loader size={15} strokeWidth={2} /> : <FileText size={15} strokeWidth={2} />}
-            <span>{t('lessons.rebuildStructure')}</span>
-          </button>
           <button
             type="button"
             className={styles.batchButton}
             disabled={progress.completedLessons <= 0}
             onClick={() => {
               setShowClearCompletedConfirm(true)
-              setShowBatchConfirm(false)
               setShowRebuildConfirm(false)
               setClearCompletedResult(null)
             }}
@@ -438,26 +415,6 @@ export default function LessonPathPage() {
           </div>
         </div>
       </header>
-
-      {showBatchConfirm && (
-        <section className={styles.batchConfirm}>
-          <div className={styles.batchConfirmIcon}>
-            <ShieldCheck size={20} strokeWidth={2} />
-          </div>
-          <div className={styles.batchConfirmCopy}>
-            <strong>{t('lessons.batchConfirmTitle')}</strong>
-            <span>{t('lessons.batchConfirmDesc')}</span>
-          </div>
-          <div className={styles.batchConfirmActions}>
-            <button type="button" onClick={handleBatchRegenerate}>
-              {t('lessons.batchStart')}
-            </button>
-            <button type="button" onClick={() => setShowBatchConfirm(false)}>
-              {t('lessons.batchCancel')}
-            </button>
-          </div>
-        </section>
-      )}
 
       {showRebuildConfirm && (
         <section className={styles.batchConfirm}>

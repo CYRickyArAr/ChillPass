@@ -9,6 +9,21 @@ marked.setOptions({
   gfm: true,
 })
 
+function renderCodeBlock(text: string, language = ''): string {
+  const lang = useLanguageStore.getState().language
+  const label = language || (lang === 'zh' ? '代码' : 'Code')
+  return '<div class="chillpassCodeBlock">' +
+    '<div class="chillpassCodeHeader">' +
+    `<span>${escapeHtml(label)}</span>` +
+    `<button type="button" data-code-copy aria-label="${lang === 'zh' ? '复制代码' : 'Copy code'}">${translate(lang, 'about.copy')}</button>` +
+    '</div>' +
+    `<pre><code>${escapeHtml(text)}</code></pre></div>`
+}
+
+marked.use({ renderer: {
+  code({ text, lang }) { return renderCodeBlock(text, lang?.split(/\s+/)[0] || '') },
+} })
+
 /**
  * 使用占位符策略渲染数学公式：
  * 1. 先提取所有数学表达式，替换为唯一占位符
@@ -22,7 +37,7 @@ interface MathPlaceholder {
   html: string
 }
 
-const BARE_FORMULA_RE = /(^|[ \t([{（,，。;；:：、])([A-Za-zΣ∑][A-Za-z0-9_()[\]{}.,+\-*/^=<>≤≥≈≠∑Σπ∞α-ωΑ-Ω\\ \t]{2,180})(?=$|[ \t)\]}）,，。;；:：、!?！？])/g
+const BARE_FORMULA_RE = /(^|[ \t([{（,，。;；:：、\u4e00-\u9fff])([A-Za-zΣ∑(][A-Za-z0-9_()[\]{}.,+\-*/^=<>≤≥≈≠∑Σπ∞α-ωΑ-Ω₀-₉⁰¹²³⁴⁵⁶⁷⁸⁹×·÷\\ \t]{2,180})(?=$|[ \t)\]}）,，。;；:：、!?！？\u4e00-\u9fff])/g
 
 const MATH_IDENTIFIER_ALLOWLIST = new Set([
   'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'm', 'n', 'p', 'q', 's',
@@ -38,7 +53,7 @@ const STRONG_MATH_SIGNAL_RE = /[=<>≤≥≈≠Σ∑]/
 
 function shouldRenderBareMath(candidate: string): boolean {
   const text = candidate.trim()
-  if (text.length < 4 || text.includes('://') || text.includes('@') || /[\u4e00-\u9fff]/.test(text)) {
+  if (text.length < 4 || text.includes('://') || text.includes('@') || /[\u4e00-\u9fff]/.test(text) || /KATEXMATH\d+ENDMATH/.test(text)) {
     return false
   }
   if (!STRONG_MATH_SIGNAL_RE.test(text) && !COMMON_MATH_FUNCTION_RE.test(text)) {
@@ -47,6 +62,7 @@ function shouldRenderBareMath(candidate: string): boolean {
 
   const identifiers = text.match(/[A-Za-z]{2,}/g) ?? []
   const hasKnownMathName = identifiers.some(word => MATH_IDENTIFIER_ALLOWLIST.has(word.toLowerCase()))
+    || /log[₀-₉_]/.test(text)
   const hasSymbolicMath = /[Σ∑≤≥≈≠π∞α-ωΑ-Ω]/.test(text)
   const hasOnlyShortUnknowns = identifiers.every(word => (
     word.length <= 2 || MATH_IDENTIFIER_ALLOWLIST.has(word.toLowerCase())
@@ -189,10 +205,35 @@ function toLatexFractions(input: string): string {
   return output
 }
 
+/** Plain-text ^(a+b) means the whole group is an exponent, not just '('. */
+function groupPlainMathScripts(input: string): string {
+  let result = ''
+  for (let i = 0; i < input.length; i++) {
+    const marker = input[i]
+    if ((marker === '^' || marker === '_') && input[i + 1] === '(') {
+      const end = findMatchingClose(input, i + 1, '(', ')')
+      if (end !== -1) {
+        result += `${marker}{${groupPlainMathScripts(input.slice(i + 2, end))}}`
+        i = end
+        continue
+      }
+    }
+    result += marker
+  }
+  return result
+}
+
 function normalizeBareMath(candidate: string): string {
-  const latex = candidate
+  const latex = groupPlainMathScripts(candidate)
     .trim()
     .replace(/\s+/g, ' ')
+    .replace(/[₀-₉]+/g, digits => `_{${Array.from(digits, digit => '₀₁₂₃₄₅₆₇₈₉'.indexOf(digit)).join('')}}`)
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, digits => `^{${Array.from(digits, digit => '⁰¹²³⁴⁵⁶⁷⁸⁹'.indexOf(digit)).join('')}}`)
+    // Accept compact forms such as 2Blog₂M without treating log as three variables.
+    .replace(/(^|[^A-Za-z\\]|[A-Z])log(?=\s*[_({])/g, '$1\\log')
+    .replace(/×/g, '\\times ')
+    .replace(/·/g, '\\cdot ')
+    .replace(/÷/g, '\\div ')
     .replace(/\b([A-Za-z][A-Za-z0-9]*)\[([A-Za-z0-9_+\-]+)\]/g, '$1_{$2}')
     .replace(/\b([A-Za-z][A-Za-z0-9]*)\[([A-Za-z0-9_+\-]+)\)/g, '$1_{$2})')
     .replace(/\)\[([A-Za-z0-9_+\-]+)\]/g, ')_{$1}')
@@ -204,7 +245,7 @@ function normalizeBareMath(candidate: string): string {
     .replace(/\bsigmoid\s*\(/gi, '\\operatorname{sigmoid}(')
     .replace(/\brelu\s*\(/gi, '\\operatorname{ReLU}(')
     .replace(/\bexp\s*\(/gi, '\\exp(')
-    .replace(/\blog\s*\(/gi, '\\log(')
+    .replace(/(?<!\\)\blog\s*\(/gi, '\\log(')
     .replace(/\bln\s*\(/gi, '\\ln(')
     .replace(/\bmax\s*\(/gi, '\\max(')
     .replace(/\bmin\s*\(/gi, '\\min(')
@@ -230,7 +271,8 @@ function extractAndRenderMath(text: string): { text: string; placeholders: MathP
   const replace = (math: string, displayMode: boolean): string => {
     const id = `KATEXMATH${counter}ENDMATH`
     counter++
-    const mathToRender = toLatexFractions(math)
+    // Explicit LaTeX must retain its grouping and division semantics.
+    const mathToRender = math
     try {
       const html = katex.renderToString(mathToRender, {
         displayMode,
@@ -246,6 +288,14 @@ function extractAndRenderMath(text: string): { text: string; placeholders: MathP
       return displayMode ? `$$${math}$$` : `$${math}$`
     }
   }
+
+  // Do not reinterpret formulas inside code examples.
+  const code: string[] = []
+  text = text.replace(/(`{3,}|~{3,})[^\n]*\n[\s\S]*?\1|`+[^`\n]*`+/g, value => {
+    const id = `PROTECTEDCODE${code.length}ENDCODE`
+    code.push(value)
+    return id
+  })
 
   // 顺序很重要：先处理 $$...$$ 和 \[...\]（块级），再处理 $...$ 和 \(...\)（行内）
   // 块级公式：$$...$$
@@ -266,6 +316,7 @@ function extractAndRenderMath(text: string): { text: string; placeholders: MathP
     return `${prefix}${leadingSpace}${replace(normalizeBareMath(math), false)}${trailingSpace}`
   })
 
+  text = text.replace(/PROTECTEDCODE(\d+)ENDCODE/g, (_, index) => code[Number(index)])
   return { text, placeholders }
 }
 
@@ -322,7 +373,7 @@ function renderSvgBlock(source: string): string {
     `<div class="svgBlockCanvas">${cleaned}</div>` +
     '<details class="svgBlockSource">' +
     `<summary>${sourceLabel}</summary>` +
-    `<pre><code>${escapeHtml(source)}</code></pre>` +
+    renderCodeBlock(source, 'svg') +
     '</details>' +
     '</div>'
   )

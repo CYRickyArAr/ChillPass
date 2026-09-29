@@ -4,7 +4,28 @@
 
 本仓库是在 [Koipoppy/ChillPass-Web](https://github.com/Koipoppy/ChillPass-Web) 基础上修改的版本，保留原项目归属说明。本仓库从当前版本独立记录提交历史；原项目历史请查看上游仓库。运行与存储方式以本页为准；其他语言的旧说明尚未同步。
 
-## 下载后在本机使用（Windows）
+## Windows 独立桌面版（0.2.0 起）
+
+桌面版使用 Electron，拥有独立窗口，无需打开浏览器，也无需使用者安装 Node.js。
+
+- 安装包文件名：`ChillPass-Setup-版本号.exe`，运行后按向导安装。
+- 本地打包输出在 `release/desktop/`；只有维护者上传 GitHub Release 后，其他用户才能在线下载。
+- 安装/卸载不主动删除学习数据；关闭窗口前会提交待保存数据，保存失败时取消退出。
+- 桌面版读取现有本地学习数据目录，但不读取 Chrome/Edge 的设置或密钥。首次使用需重新配置 API Key。
+- 未经代码签名的安装包可能触发 Windows SmartScreen 提醒；正式公开分发前建议配置代码签名。
+
+开发者启动与打包：
+
+```powershell
+npm ci
+npm run desktop        # 构建并打开独立窗口
+npm run desktop:pack   # 生成免安装程序目录，整个目录需要一起保留
+npm run desktop:dist   # 生成 Windows x64 安装包
+```
+
+详见 [桌面版安装、数据与发布说明](docs/desktop.md)。
+
+## 源码浏览器版在本机使用（Windows）
 
 1. 安装 **Node.js 22 或更新版本**（包含 npm），官网为 https://nodejs.org/。
 2. 在本仓库选择 **Code → Download ZIP**，完整解压到一个可写目录。
@@ -39,13 +60,13 @@ ChillPass/
    ├─ courses.json           课程、考点、关卡、学习进度
    ├─ quiz-progress.json     答题记录
    ├─ wrong-questions.json   错题
-   ├─ conversations.json    Athena 会话和消息
+   ├─ conversations.json    按课程分组的会话、消息与独立记忆
    ├─ current-conversation.json
-   ├─ athena.json           Athena 记忆与能力
+   ├─ athena.json           模型偏好与旧全局记忆/技能归档
    └─ backups/              迁移和修改前的备份
 ```
 
-学习数据以硬盘为准；浏览器保留缓存和待保存队列。API key、主题等通用设置仍存于浏览器。原本只存在浏览器中的课件需通过存储设置里的迁移功能复制到硬盘。
+学习数据以硬盘为准；浏览器或桌面应用缓存保留待保存队列。API key、主题等通用设置存于各自的浏览器/桌面配置目录，不会自动跨端同步。原本只存在浏览器中的课件需先在原浏览器中通过存储设置迁移到硬盘。
 
 切勿在提示“尚未保存”时关闭程序或清除浏览器数据。保存失败、版本冲突和损坏的数据不会被静默覆盖。备份不自动清理，会占用额外空间。
 
@@ -55,7 +76,7 @@ ChillPass/
 
 - 导入 PDF、Word、PPTX、TXT、Markdown。
 - 生成考点、学习关卡、例题和小测，保存学习与答题进度。
-- Athena 多会话、重命名、模型与思考设置、停止生成、编辑重发。
+- Athena 按课程分组的多会话、会话独立记忆、重命名、模型与思考设置、停止生成、编辑重发。
 - 可调整宽度的侧边聊天，长会话分批加载。
 - 课程切换、课件追加、错题本、本地数据备份。
 
@@ -63,9 +84,11 @@ AI 功能会将相关课件内容和问题发送给你配置的模型服务，�
 
 ## 更新
 
-下载最新 ZIP，解压到新的程序文件夹，再运行 `Start-ChillPass.bat`。学习数据在用户文档目录，不随程序文件夹删除。使用原浏览器和访问地址可保留 API key 等设置。不要用旧 release 覆盖本仓库。
+**桌面版：**检查 GitHub 已发布的正式 Release，仅在发现版本更高且带有 `ChillPass-Setup-*.exe` 附件时提示。保存退出后手动运行新版安装包，不自动下载或覆盖。尚未发布桌面安装包时不会提示升级。请勿用旧浏览器启动器安装包覆盖桌面版。
 
-程序启动后会检查 GitHub 仓库 `package.json` 中的版本号；发现更高版本时仅提示下载源码 ZIP，不会自动安装或覆盖文件。也可在“设置 → 关于”手动检查。每次发布新版源码时须递增 `package.json` 与 `package-lock.json` 的版本号，否则旧版不会提示更新。
+**源码浏览器版：**下载最新 ZIP，解压到新的程序文件夹，再运行 `Start-ChillPass.bat`。学习数据在用户文档目录，不随程序文件夹删除。使用原浏览器和访问地址可保留 API key 等设置。不要用旧 release 覆盖本仓库。
+
+源码浏览器版启动后会检查 GitHub 仓库 `package.json` 中的版本号；发现更高版本时仅提示下载源码 ZIP，不会自动安装或覆盖文件。也可在“设置 → 关于”手动检查。每次发布新版源码时须递增 `package.json` 与 `package-lock.json` 的版本号，否则旧版不会提示更新。
 
 ## 开发检查
 

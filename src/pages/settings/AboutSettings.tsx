@@ -79,7 +79,7 @@ export default function AboutSettings() {
       <section className={`liquid-glass ${styles.card}`}>
         <div className={styles.cardHeader}>
           <h2 className={styles.cardTitle}>{t('about.updateTitle')}</h2>
-          <p className={styles.cardDesc}>{t('about.updateDesc')}</p>
+          <p className={styles.cardDesc}>{t(window.chillpassDesktop ? 'about.desktopUpdateDesc' : 'about.updateDesc')}</p>
         </div>
         <div className={styles.actions}>
           <button type="button" className={styles.ghostBtn} onClick={checkUpdate} disabled={updateStatus === 'checking'}>
@@ -89,14 +89,14 @@ export default function AboutSettings() {
           {updateInfo && (
             <a className={styles.linkBtn} href={updateInfo.downloadUrl} target="_blank" rel="noopener noreferrer">
               <Download size={16} strokeWidth={2} />
-              {t('about.downloadSource')}
+              {t(window.chillpassDesktop ? 'about.downloadInstaller' : 'about.downloadSource')}
             </a>
           )}
         </div>
         {updateStatus === 'available' && updateInfo && (
           <p className={styles.updateStatus} role="status">
             {t('about.updateAvailable').replace('{version}', updateInfo.version)}<br />
-            {t('about.sourceUpdateHint')}
+            {t(window.chillpassDesktop ? 'about.desktopUpdateHint' : 'about.sourceUpdateHint')}
           </p>
         )}
         {updateStatus === 'not-available' && <p className={styles.updateStatus} role="status">{t('about.upToDate')}</p>}

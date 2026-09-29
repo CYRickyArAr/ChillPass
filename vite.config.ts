@@ -245,6 +245,30 @@ export default defineConfig({
             if (!urlPath.startsWith('/api/')) return next()
             if (await handleLearningData(req, res, urlPath)) return
             if (urlPath === '/api/getAppVersion') return sendJson(res, { version: APP_VERSION, buildId: 'development-local-learning-data' })
+            if (urlPath === '/api/checkForUpdates' && req.method === 'GET') {
+              res.setHeader('Cache-Control', 'no-store')
+              try {
+                const response = await fetch('https://api.github.com/repos/CYRickyArAr/ChillPass/contents/package.json?ref=master', {
+                  headers: { 'User-Agent': 'ChillPass-Updater/1.0', Accept: 'application/vnd.github+json' },
+                  signal: AbortSignal.timeout(12000),
+                })
+                if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`)
+                const file = await response.json() as { encoding?: string; content?: string }
+                if (file.encoding !== 'base64' || typeof file.content !== 'string') throw new Error('Invalid package response')
+                const latestVersion = JSON.parse(Buffer.from(file.content.replace(/\s/g, ''), 'base64').toString('utf8')).version
+                if (typeof latestVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(latestVersion)) throw new Error('Invalid remote version')
+                const remote = latestVersion.split('.').map(Number)
+                const local = APP_VERSION.split('.').map(Number)
+                const firstDifference = remote.findIndex((part, index) => part !== local[index])
+                return sendJson(res, {
+                  updateAvailable: firstDifference >= 0 && remote[firstDifference] > local[firstDifference],
+                  latestVersion,
+                  currentVersion: APP_VERSION,
+                })
+              } catch {
+                return sendJson(res, { error: '无法获取 GitHub 版本信息，请检查网络连接后重试' }, 502)
+              }
+            }
 
             if (urlPath === '/api/fetchProviderModels' && req.method === 'POST') {
               const body = await readRequestJson(req)

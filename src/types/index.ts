@@ -441,8 +441,16 @@ export interface ElectronAPI {
   fileExists: (filePath: string) => Promise<boolean>
 }
 
+export interface DesktopBridge extends Pick<ElectronAPI,
+  'platform' | 'windowMinimize' | 'windowMaximize' | 'windowClose' | 'windowIsMaximized'
+  | 'onWindowMaximizeChange' | 'enterFocusMode' | 'exitFocusMode' | 'isFullScreen'
+  | 'onFocusExited' | 'checkForUpdates' | 'openExternalUrl'> {
+  onPrepareClose: (callback: () => Promise<void>) => () => void
+}
+
 declare global {
   interface Window {
     electronAPI?: ElectronAPI
+    chillpassDesktop?: DesktopBridge
   }
 }

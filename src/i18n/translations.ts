@@ -61,6 +61,9 @@ export type TranslationKey =
   | 'about.currentVersion'
   | 'about.updateTitle'
   | 'about.updateDesc'
+  | 'about.desktopUpdateDesc'
+  | 'about.downloadInstaller'
+  | 'about.desktopUpdateHint'
   | 'about.checkUpdate'
   | 'about.checkingUpdate'
   | 'about.updateAvailable'
@@ -749,6 +752,12 @@ export type TranslationKey =
   | 'athena.newChat'
   | 'athena.deleteChat'
   | 'athena.messageCount'
+  | 'athena.newChatInCourse'
+  | 'athena.noConversations'
+  | 'athena.groupGeneral'
+  | 'athena.groupDeleted'
+  | 'athena.groupScoped'
+  | 'athena.currentConversation'
 
   | 'sidebar.courseManage'
   | 'sidebar.importShort'
@@ -816,6 +825,9 @@ const zh: Record<TranslationKey, string> = {
   'about.currentVersion': '当前版本',
   'about.updateTitle': '检查更新',
   'about.updateDesc': '检查 GitHub 上是否有更新的源码版本，不会自动安装或覆盖数据。',
+  'about.desktopUpdateDesc': '检查 GitHub 上已发布的新版桌面安装包，不会自动安装或覆盖数据。',
+  'about.downloadInstaller': '下载桌面安装包',
+  'about.desktopUpdateHint': '保存并退出软件后运行新版安装包；学习数据保留。桌面版不要使用源码 ZIP 或旧版启动器更新。',
   'about.checkUpdate': '检查更新',
   'about.checkingUpdate': '正在检查…',
   'about.updateAvailable': '发现新版本 {version}',
@@ -951,6 +963,12 @@ const zh: Record<TranslationKey, string> = {
   'athena.newChat': "新会话",
   'athena.deleteChat': "删除该会话",
   'athena.messageCount': "{count} 条消息",
+  'athena.newChatInCourse': "在「{course}」中新建会话",
+  'athena.noConversations': "还没有会话",
+  'athena.groupGeneral': "通用 / 历史未归组",
+  'athena.groupDeleted': "{course}（课程已删除）",
+  'athena.groupScoped': "记忆与课件仅限本组会话",
+  'athena.currentConversation': "当前会话",
   'chat.svgSource': "查看 SVG 源码",
   'img.invalidFormat': "无法读取该图片，请改用 PNG、JPEG、WebP 或 GIF 格式",
   'img.tooLarge': "图片过大，压缩后仍无法发送，请换一张更小的图片",
@@ -1550,6 +1568,9 @@ const en: Record<TranslationKey, string> = {
   'about.currentVersion': 'Current version',
   'about.updateTitle': 'Check for updates',
   'about.updateDesc': 'Check GitHub for a newer source version. Nothing is installed or overwritten automatically.',
+  'about.desktopUpdateDesc': 'Check published GitHub releases for a newer desktop installer. Nothing is installed automatically.',
+  'about.downloadInstaller': 'Download desktop installer',
+  'about.desktopUpdateHint': 'Save and exit before running the new installer. Learning data is retained. Do not update the desktop app using source ZIPs or legacy launchers.',
   'about.checkUpdate': 'Check for updates',
   'about.checkingUpdate': 'Checking…',
   'about.updateAvailable': 'Version {version} is available',
@@ -1683,6 +1704,12 @@ const en: Record<TranslationKey, string> = {
   'athena.newChat': "New chat",
   'athena.deleteChat': "Delete this conversation",
   'athena.messageCount': "{count} messages",
+  'athena.newChatInCourse': "New chat in \"{course}\"",
+  'athena.noConversations': "No conversations yet",
+  'athena.groupGeneral': "General / unassigned history",
+  'athena.groupDeleted': "{course} (course deleted)",
+  'athena.groupScoped': "Course and memories are limited to this group",
+  'athena.currentConversation': "Current conversation",
   'chat.svgSource': "View SVG source",
   'img.invalidFormat': "Could not read this image — please use PNG, JPEG, WebP or GIF",
   'img.tooLarge': "The image is too large to send even after compression — please use a smaller one",

@@ -29,6 +29,10 @@ export interface ProviderConnectionSettings {
   name: string
   baseUrl: string
   apiKey: string
+  /** Preferred model for this provider; the active provider is chosen separately. */
+  model?: string
+  /** Last manually fetched model IDs, kept locally until the user refreshes them. */
+  availableModels?: string[]
   custom?: boolean
   usageQuery?: CustomUsageQuerySettings
 }
@@ -191,6 +195,10 @@ export function getProviderConnection(
       name: connection.name || preset?.name || '自定义供应商',
       baseUrl: connection.baseUrl || preset?.baseUrl || '',
       apiKey: connection.apiKey || '',
+      model: connection.model,
+      availableModels: Array.isArray(connection.availableModels)
+        ? connection.availableModels.filter(id => typeof id === 'string' && id.length > 0)
+        : undefined,
       custom: connection.custom ?? !preset,
       usageQuery: connection.usageQuery ?? {
         enabled: false,
@@ -498,13 +506,11 @@ export const useSettingsStore = create<SettingsState>()(
         const id = `custom:${Date.now().toString(36)}`
         const makeName = (count: number) => (count <= 1 ? '自定义供应商' : `自定义供应商 ${count}`)
         set(state => ({
-          provider: id,
           customProviderIds: Array.from(new Set([...(state.customProviderIds ?? []), id])),
           providerConnections: {
             ...state.providerConnections,
             [id]: createDefaultCustomConnection(makeName((state.customProviderIds?.length ?? 0) + 1)),
           },
-          model: PROVIDER_DEFAULT_MODEL.custom,
         }))
         return id
       },
@@ -517,7 +523,9 @@ export const useSettingsStore = create<SettingsState>()(
           providerConnections,
           customProviderIds,
           provider: state.provider === provider ? 'deepseek' : state.provider,
-          model: state.provider === provider ? PROVIDER_DEFAULT_MODEL.deepseek : state.model,
+          model: state.provider === provider
+            ? providerConnections.deepseek?.model || PROVIDER_DEFAULT_MODEL.deepseek
+            : state.model,
         }
         if (provider === 'custom') {
           patch.customProviderName = '自定义供应商'

@@ -34,7 +34,10 @@ const BASE_DIR = process.env.CHILLPASS_APP_DIR || __dirname;
 const DIST_DIR = join(BASE_DIR, 'dist');
 const TRAY_SCRIPT = join(BASE_DIR, 'tray.ps1');
 const ICON_PATH = join(BASE_DIR, 'icon.ico');
-const PORT = Number(process.env.CHILLPASS_PORT) || 5174;
+const DESKTOP = process.env.CHILLPASS_DESKTOP === '1';
+const DESKTOP_TOKEN = process.env.CHILLPASS_DESKTOP_TOKEN;
+if (DESKTOP && !DESKTOP_TOKEN) throw new Error('Desktop backend requires a session token');
+const PORT = DESKTOP ? 0 : (Number(process.env.CHILLPASS_PORT) || 5174);
 const APP_VERSION = (() => {
   try {
     const version = JSON.parse(readFileSync(join(BASE_DIR, 'package.json'), 'utf8')).version;
@@ -587,6 +590,11 @@ async function handleApi(req, res, urlPath) {
 // ── HTTP server ─────────────────────────────────────────────────
 const server = createServer(async (req, res) => {
   try {
+    // Desktop requests are proxied by the trusted main process, never directly by web pages.
+    if (DESKTOP && req.headers['x-chillpass-desktop-token'] !== DESKTOP_TOKEN) {
+      sendJson(res, { error: 'Forbidden' }, 403);
+      return;
+    }
     let urlPath = decodeURIComponent(req.url ? req.url.split('?')[0] : '/');
 
     // API routes take priority
@@ -644,7 +652,18 @@ const server = createServer(async (req, res) => {
 });
 
 // ── Start ───────────────────────────────────────────────────────
+const ready = new Promise((resolveReady, rejectReady) => {
+  server.once('listening', () => resolveReady(server.address()));
+  server.once('error', rejectReady);
+});
+// Browser mode handles its startup error below; desktop mode awaits ready.
+if (!DESKTOP) ready.catch(() => {});
+module.exports = { server, ready, close: () => new Promise((resolveClose, rejectClose) => {
+  server.close(error => error ? rejectClose(error) : resolveClose());
+}) };
+
 server.on('error', async (err) => {
+  if (DESKTOP) return;
   if (err.code === 'EADDRINUSE') {
     console.log(`\n  端口 ${PORT} 已被占用，可能已有实例在运行。`);
     let sameBuild = false;
@@ -661,7 +680,8 @@ server.on('error', async (err) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
+  if (DESKTOP) return;
   const url = `http://localhost:${PORT}`;
   console.log('');
   console.log('  ============================================');
@@ -686,5 +706,7 @@ server.listen(PORT, () => {
 });
 
 // Handle termination signals
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+if (!DESKTOP) {
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
