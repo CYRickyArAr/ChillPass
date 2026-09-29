@@ -7,24 +7,18 @@ import 'katex/contrib/copy-tex'
 import './styles/global.css'
 import { setupElectronMock } from './utils/electronMock'
 import { setupCodeCopy } from './utils/codeCopy'
-import { initializeLearningData, flushLearningData } from './services/learningDataStorage'
+import { initializeLearningData } from './services/learningDataStorage'
 
 // 非 Electron 环境下注入 Mock API
 setupElectronMock()
 const cleanupCodeCopy = setupCodeCopy()
 if (import.meta.hot) import.meta.hot.dispose(cleanupCodeCopy)
-let initialization: Promise<void> | undefined
-window.chillpassDesktop?.onPrepareClose(async () => {
-  await initialization?.catch(() => {})
-  await flushLearningData()
-})
 
 async function start() {
   const container = document.getElementById('root')!
   container.textContent = '正在校验并加载本地学习数据…'
   try {
-    initialization = initializeLearningData()
-    await initialization
+    await initializeLearningData()
     const { default: App } = await import('./App')
     ReactDOM.createRoot(container).render(
   <React.StrictMode>

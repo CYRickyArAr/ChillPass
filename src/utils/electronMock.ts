@@ -309,28 +309,8 @@ export function setupElectronMock() {
     },
   }
 
-  // Desktop reuses the same file/storage adapters; only native window operations
-  // and installer-update checks cross the narrow, isolated preload bridge.
-  const desktop = window.chillpassDesktop
-  const api = desktop ? {
-    ...mockAPI,
-    platform: desktop.platform,
-    windowMinimize: desktop.windowMinimize,
-    windowMaximize: desktop.windowMaximize,
-    windowClose: desktop.windowClose,
-    windowIsMaximized: desktop.windowIsMaximized,
-    onWindowMaximizeChange: desktop.onWindowMaximizeChange,
-    enterFocusMode: desktop.enterFocusMode,
-    exitFocusMode: desktop.exitFocusMode,
-    isFullScreen: desktop.isFullScreen,
-    onFocusExited: desktop.onFocusExited,
-    checkForUpdates: desktop.checkForUpdates,
-    openExternalUrl: desktop.openExternalUrl,
-    startUpdate: async () => { throw new Error('请手动下载并运行新版桌面安装包。') },
-  } : mockAPI
-
   Object.defineProperty(window, 'electronAPI', {
-    value: api,
+    value: mockAPI,
     writable: false,
     configurable: true,
   })

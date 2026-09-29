@@ -44,8 +44,8 @@ export default function TitleBar() {
   const setModel = useSettingsStore(s => s.setModel)
   const t = useT()
 
-  // Desktop uses native Windows window controls; avoid a second set of traffic lights.
-  const isBrowser = window.electronAPI?.platform === 'browser' || Boolean(window.chillpassDesktop)
+  // 浏览器模式下隐藏窗口控制按钮
+  const isBrowser = window.electronAPI?.platform === 'browser'
 
   useEffect(() => {
     // 获取初始最大化状态

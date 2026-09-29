@@ -61,9 +61,6 @@ export type TranslationKey =
   | 'about.currentVersion'
   | 'about.updateTitle'
   | 'about.updateDesc'
-  | 'about.desktopUpdateDesc'
-  | 'about.downloadInstaller'
-  | 'about.desktopUpdateHint'
   | 'about.checkUpdate'
   | 'about.checkingUpdate'
   | 'about.updateAvailable'
@@ -825,9 +822,6 @@ const zh: Record<TranslationKey, string> = {
   'about.currentVersion': '当前版本',
   'about.updateTitle': '检查更新',
   'about.updateDesc': '检查 GitHub 上是否有更新的源码版本，不会自动安装或覆盖数据。',
-  'about.desktopUpdateDesc': '检查 GitHub 上已发布的新版桌面安装包，不会自动安装或覆盖数据。',
-  'about.downloadInstaller': '下载桌面安装包',
-  'about.desktopUpdateHint': '保存并退出软件后运行新版安装包；学习数据保留。桌面版不要使用源码 ZIP 或旧版启动器更新。',
   'about.checkUpdate': '检查更新',
   'about.checkingUpdate': '正在检查…',
   'about.updateAvailable': '发现新版本 {version}',
@@ -1568,9 +1562,6 @@ const en: Record<TranslationKey, string> = {
   'about.currentVersion': 'Current version',
   'about.updateTitle': 'Check for updates',
   'about.updateDesc': 'Check GitHub for a newer source version. Nothing is installed or overwritten automatically.',
-  'about.desktopUpdateDesc': 'Check published GitHub releases for a newer desktop installer. Nothing is installed automatically.',
-  'about.downloadInstaller': 'Download desktop installer',
-  'about.desktopUpdateHint': 'Save and exit before running the new installer. Learning data is retained. Do not update the desktop app using source ZIPs or legacy launchers.',
   'about.checkUpdate': 'Check for updates',
   'about.checkingUpdate': 'Checking…',
   'about.updateAvailable': 'Version {version} is available',

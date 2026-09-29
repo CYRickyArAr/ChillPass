@@ -285,12 +285,12 @@ export default function App() {
         <aside className={styles.updateNotice} role="status" aria-live="polite">
           <div className={styles.updateNoticeCopy}>
             <strong>{t('about.updateAvailable').replace('{version}', availableUpdate.version)}</strong>
-            <span>{t(window.chillpassDesktop ? 'about.desktopUpdateHint' : 'about.sourceUpdateHint')}</span>
+            <span>{t('about.sourceUpdateHint')}</span>
           </div>
           <div className={styles.updateNoticeActions}>
             <a href={availableUpdate.downloadUrl} target="_blank" rel="noopener noreferrer">
               <Download size={15} strokeWidth={2} />
-              {t(window.chillpassDesktop ? 'about.downloadInstaller' : 'about.downloadSource')}
+              {t('about.downloadSource')}
             </a>
             <button type="button" onClick={dismissUpdate} aria-label={t('about.updateLater')}>
               <X size={17} strokeWidth={2} />
