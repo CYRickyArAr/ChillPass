@@ -1,9 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { normalizeModelId } from '../services/modelCatalog'
+import { OPENCODE_GO_BASE_URL } from '../services/opencodeGo'
 
 /** AI 服务提供商 */
 export type BuiltinAIProvider =
+  | 'chatgpt'
+  | 'opencode-go'
   | 'deepseek'
   | 'zhipu'
   | 'qwen'
@@ -33,11 +36,27 @@ export interface ProviderConnectionSettings {
   model?: string
   /** Last manually fetched model IDs, kept locally until the user refreshes them. */
   availableModels?: string[]
+  /** Undefined = all catalog models; [] = explicitly disabled all models. */
+  enabledModels?: string[]
+  /** Public registration ID associates the preferred model with an account; never a token. */
+  oauthAccountId?: string | null
   custom?: boolean
   usageQuery?: CustomUsageQuerySettings
 }
 
 export const BUILTIN_PROVIDER_PRESETS: Record<BuiltinAIProvider, ProviderPreset> = {
+  chatgpt: {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    baseUrl: '', // OAuth endpoints and credentials belong exclusively to the local server.
+    defaultModel: '', // Use the signed-in account's catalog, never a hard-coded model.
+  },
+  'opencode-go': {
+    id: 'opencode-go',
+    name: 'OpenCode Go',
+    baseUrl: OPENCODE_GO_BASE_URL,
+    defaultModel: 'glm-5.3-flash',
+  },
   deepseek: {
     id: 'deepseek',
     name: 'DeepSeek',
@@ -196,6 +215,8 @@ export function getProviderConnection(
       baseUrl: connection.baseUrl || preset?.baseUrl || '',
       apiKey: connection.apiKey || '',
       model: connection.model,
+      oauthAccountId: connection.oauthAccountId,
+      enabledModels: Array.isArray(connection.enabledModels) ? connection.enabledModels.filter(id => typeof id === 'string') : undefined,
       availableModels: Array.isArray(connection.availableModels)
         ? connection.availableModels.filter(id => typeof id === 'string' && id.length > 0)
         : undefined,
@@ -219,6 +240,13 @@ export function getProviderConnection(
     }
   }
   return createDefaultCustomConnection(state.customProviderName, state.customBaseUrl, state.customApiKey)
+}
+
+export function getVisibleProviderIds(state = useSettingsStore.getState()): AIProvider[] {
+  return Array.from(new Set<AIProvider>([
+    ...BUILTIN_PROVIDER_IDS.filter(id => id === 'chatgpt' || (!state.providerDisabled && id === state.provider) || Boolean(state.providerConnections[id]?.apiKey || state.providerConnections[id]?.model)),
+    ...(state.customProviderIds as AIProvider[]), ...(state.addedProviderIds || []),
+  ])).filter(id => !(state.removedProviderIds || []).includes(id))
 }
 
 export function getProviderDisplayName(provider: AIProvider, state = useSettingsStore.getState()): string {
@@ -306,7 +334,11 @@ function writeUiFontScaleToElement(element: HTMLElement, scale: number) {
   const baseFontSize = Number.parseFloat(element.dataset.uiFontBaseSize ?? '')
   if (!Number.isFinite(baseFontSize) || baseFontSize <= 0) return
 
-  element.style.fontSize = `${Number((Math.max(UI_FONT_MIN_PX, baseFontSize * scale)).toFixed(3))}px`
+  // Dense model controls have a smaller design baseline; keep the user's zoom
+  // multiplier without forcing every 10–12px label up to the global 14px floor.
+  const localMinimum = Number(element.closest('[data-ui-font-min]')?.getAttribute('data-ui-font-min'))
+  const minimum = localMinimum > 0 ? Math.min(UI_FONT_MIN_PX, Math.max(10, localMinimum)) : UI_FONT_MIN_PX
+  element.style.fontSize = `${Number((Math.max(minimum, baseFontSize * scale)).toFixed(3))}px`
 }
 
 function resetUiFontScaleInTree(root: HTMLElement) {
@@ -382,6 +414,11 @@ function applyUiFontScale(value: number) {
 
 interface SettingsState {
   provider: AIProvider
+  providerDisabled: boolean
+  addedProviderIds: AIProvider[]
+  removedProviderIds: AIProvider[]
+  addProvider: (provider: AIProvider) => void
+  removeProvider: (provider: AIProvider) => void
   apiKey: string
   zhipuApiKey: string
   customProviderName: string
@@ -419,9 +456,30 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>()(
-  persist(
+  persist<SettingsState>(
     (set) => ({
       provider: 'deepseek',
+      providerDisabled: false,
+      addedProviderIds: [],
+      removedProviderIds: [],
+      addProvider: provider => set(state => ({
+        addedProviderIds: Array.from(new Set([...(state.addedProviderIds || []), provider])),
+        removedProviderIds: (state.removedProviderIds || []).filter(id => id !== provider),
+      })),
+      removeProvider: provider => set(state => {
+        const providerConnections = { ...state.providerConnections }
+        delete providerConnections[provider]
+        return {
+          providerConnections,
+          customProviderIds: state.customProviderIds.filter(id => id !== provider),
+          addedProviderIds: (state.addedProviderIds || []).filter(id => id !== provider),
+          removedProviderIds: Array.from(new Set([...(state.removedProviderIds || []), provider])),
+          ...(provider === state.provider ? { providerDisabled: true, model: '' } : {}),
+          ...(provider === 'deepseek' ? { apiKey: '' } : {}),
+          ...(provider === 'zhipu' ? { zhipuApiKey: '' } : {}),
+          ...(provider === 'custom' ? { customApiKey: '', customBaseUrl: '', customProviderName: '自定义供应商', customUsageQuery: { enabled: false, script: DEFAULT_CUSTOM_USAGE_SCRIPT } } : {}),
+        }
+      }),
       apiKey: '',
       zhipuApiKey: '',
       customProviderName: '自定义供应商',
@@ -443,7 +501,7 @@ export const useSettingsStore = create<SettingsState>()(
       githubToken: '',
       isTeacher: false,
       uiFontScale: UI_FONT_SCALE_DEFAULT,
-      setProvider: (provider) => set({ provider }),
+      setProvider: (provider) => set(state => ({ provider, providerDisabled: (state.removedProviderIds || []).includes(provider) })),
       setApiKey: (key) => set({ apiKey: key }),
       setZhipuApiKey: (key) => set({ zhipuApiKey: key }),
       setCustomProviderName: (name) => set(state => ({
@@ -482,6 +540,8 @@ export const useSettingsStore = create<SettingsState>()(
           ...previous,
           ...value,
           usageQuery: {
+            enabled: false,
+            script: DEFAULT_CUSTOM_USAGE_SCRIPT,
             ...previous.usageQuery,
             ...value.usageQuery,
           },
@@ -503,7 +563,7 @@ export const useSettingsStore = create<SettingsState>()(
         return patch
       }),
       addCustomProvider: () => {
-        const id = `custom:${Date.now().toString(36)}`
+        const id: AIProvider = `custom:${Date.now().toString(36)}`
         const makeName = (count: number) => (count <= 1 ? '自定义供应商' : `自定义供应商 ${count}`)
         set(state => ({
           customProviderIds: Array.from(new Set([...(state.customProviderIds ?? []), id])),
@@ -514,30 +574,9 @@ export const useSettingsStore = create<SettingsState>()(
         }))
         return id
       },
-      removeCustomProvider: (provider) => set(state => {
-        if (!isCustomProviderId(provider)) return {}
-        const providerConnections = { ...state.providerConnections }
-        delete providerConnections[provider]
-        const customProviderIds = (state.customProviderIds ?? []).filter(id => id !== provider)
-        const patch: Partial<SettingsState> = {
-          providerConnections,
-          customProviderIds,
-          provider: state.provider === provider ? 'deepseek' : state.provider,
-          model: state.provider === provider
-            ? providerConnections.deepseek?.model || PROVIDER_DEFAULT_MODEL.deepseek
-            : state.model,
-        }
-        if (provider === 'custom') {
-          patch.customProviderName = '自定义供应商'
-          patch.customApiKey = ''
-          patch.customBaseUrl = ''
-          patch.customUsageQuery = {
-            enabled: false,
-            script: DEFAULT_CUSTOM_USAGE_SCRIPT,
-          }
-        }
-        return patch
-      }),
+      removeCustomProvider: (provider) => {
+        if (isCustomProviderId(provider)) useSettingsStore.getState().removeProvider(provider)
+      },
       setCustomUsageQuery: (value) => set(state => ({
         customUsageQuery: {
           ...state.customUsageQuery,

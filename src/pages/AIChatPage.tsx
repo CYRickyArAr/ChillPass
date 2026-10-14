@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
+import { memo, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId } from 'react'
 import { createPortal } from 'react-dom'
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ChangeEvent as ReactChangeEvent, CSSProperties } from 'react'
 import { ArrowUp, ArrowDown, Trash2, Sparkles, X, Brain, Download, Upload, Plus, FileText, BookOpen, Calendar, MessageCircle, Shield, Waves, ChevronDown, Check, Square, Pencil, RefreshCw } from 'lucide-react'
@@ -6,6 +6,7 @@ import { useChatStore, EMPTY_CONVERSATION_MEMORIES } from '@stores/chatStore'
 import { useAthenaPanelStore } from '@stores/athenaPanelStore'
 import AthenaPanelControls from '../components/athena/AthenaPanelControls'
 import { useCourseStore } from '@stores/courseStore'
+import { useChatGPTStore } from '@stores/chatgptStore'
 import { useAthenaStore } from '@stores/athenaStore'
 import { useT } from '../i18n'
 import type { TranslationKey } from '../i18n'
@@ -16,6 +17,7 @@ import { storeFile } from '@services/browserFileStore'
 import { BUILTIN_MODELS, modelVisionSupport } from '@services/modelCatalog'
 import { useGlobalBlur } from '@utils/useGlobalBlur'
 import { useSettingsStore } from '@stores/settingsStore'
+import { enabledModelIds } from '@services/modelPreferences'
 import type { ChatMessage, AthenaTaskType, AthenaThinkingMode } from '@types/index'
 import { renderMarkdownBlockCached, splitStreamingBlocks } from '../utils/markdown'
 import { athenaText } from '../utils/athenaText'
@@ -317,6 +319,9 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
 
   // 会话下拉开关
   const [convMenuOpen, setConvMenuOpen] = useState(false)
+  const [expandedConvGroups, setExpandedConvGroups] = useState<Record<string, boolean>>({})
+  const convMenuId = useId()
+  const convTriggerRef = useRef<HTMLButtonElement>(null)
   const convMenuRef = useRef<HTMLDivElement>(null)
   const currentConversation = conversations.find(c => c.id === currentId)
 
@@ -333,7 +338,6 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
       }
     }
     groups.push({ courseId: null, title: t('athena.groupGeneral'), deleted: false })
-    // Only groups with conversations are expanded; empty courses collapse into a single new-chat row.
     return groups.map(group => ({
       ...group,
       conversations: conversations.filter(conv => conv.courseId === group.courseId)
@@ -351,17 +355,21 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
   const setThinkingMode = useAthenaStore(s => s.setThinkingMode)
   const provider = useSettingsStore(s => s.provider)
   const globalModel = useSettingsStore(s => s.model)
-  const effectiveAthenaModel = athenaModel.trim() || globalModel
+  const chatGPTModels = useChatGPTStore(s => s.models)
+  const providerConnection = useSettingsStore(s => s.providerConnections[s.provider])
+  const catalogKey = provider.startsWith('custom:') ? 'custom' : provider
+  const providerModelIds = provider === 'chatgpt' ? chatGPTModels.map(item => item.id)
+    : providerConnection?.availableModels ?? (BUILTIN_MODELS[catalogKey] ?? BUILTIN_MODELS.custom ?? []).map(item => item.id)
+  const selectableModels = enabledModelIds(providerModelIds, providerConnection?.enabledModels)
+  const effectiveAthenaModel = provider === 'chatgpt' || providerConnection?.enabledModels !== undefined
+    ? (selectableModels.includes(athenaModel) ? athenaModel : selectableModels.includes(globalModel) ? globalModel : selectableModels[0] || '')
+    : athenaModel.trim() || globalModel
   const effectiveAthenaModelLabel = athenaModelDisplayName(effectiveAthenaModel)
   const thinkingLabel = ATHENA_THINKING_OPTIONS.find(option => option.value === thinkingMode)?.shortLabel ?? '高'
   const athenaModelOptions = useMemo(() => {
-    const catalogKey = provider.startsWith('custom:') ? 'custom' : provider
-    const ids = (BUILTIN_MODELS[catalogKey] ?? BUILTIN_MODELS.custom ?? [])
-      .map(item => item.id)
-      .filter(Boolean)
-    // 保持模型目录原始顺序；当前/全局模型若不在目录中，只补到末尾，不因选中而顶到第一。
-    return Array.from(new Set([...ids, globalModel, effectiveAthenaModel].filter(Boolean)))
-  }, [provider, effectiveAthenaModel, globalModel])
+    if (provider === 'chatgpt' || providerConnection?.enabledModels !== undefined) return selectableModels
+    return Array.from(new Set([...selectableModels, globalModel, effectiveAthenaModel].filter(Boolean)))
+  }, [provider, effectiveAthenaModel, globalModel, chatGPTModels, providerConnection])
 
   const input = useAthenaPanelStore(s => s.draft)
   const setInput = useAthenaPanelStore(s => s.setDraft)
@@ -419,8 +427,10 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
   useEffect(() => {
     if (!convMenuOpen) return
     const frame = window.requestAnimationFrame(() => {
-      convMenuRef.current?.querySelector<HTMLElement>('[data-active-group="true"]')
-        ?.scrollIntoView({ block: 'nearest' })
+      convMenuRef.current?.querySelector<HTMLButtonElement>('[role="region"] button:not(:disabled)')?.focus({ preventScroll: true })
+      const activeRow = convMenuRef.current?.querySelector<HTMLElement>('[aria-current="true"]')
+        ?? convMenuRef.current?.querySelector<HTMLElement>('[data-active-group="true"]')
+      activeRow?.scrollIntoView({ block: 'nearest' })
     })
     return () => window.cancelAnimationFrame(frame)
   }, [convMenuOpen])
@@ -569,7 +579,10 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
       }
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setConvMenuOpen(false)
+      if (e.key === 'Escape' && !e.isComposing) {
+        setConvMenuOpen(false)
+        convTriggerRef.current?.focus({ preventScroll: true })
+      }
     }
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
@@ -822,6 +835,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
         // For task types other than 'qa', use executeTask
         if (activeTask !== 'qa') {
           for await (const chunk of executeTask(activeTask, modelContent, rawText, history, charterMemories, images, {
+            sessionId: conversationId,
             model: effectiveAthenaModel,
             thinkingMode,
             signal: controller.signal,
@@ -831,6 +845,7 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
           }
         } else {
           for await (const chunk of chatWithAthena(modelContent, rawText, history, charterMemories, flowMemories, images, {
+            sessionId: conversationId,
             model: effectiveAthenaModel,
             thinkingMode,
             signal: controller.signal,
@@ -926,12 +941,21 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
           <div className={styles.headerText}>
             <h2 className={styles.title}>Athena</h2>
             {/* 会话管理：切换 / 新建 / 删除 */}
-            <div className={styles.convSelect} ref={convMenuRef}>
+            <div className={styles.convSelect} ref={convMenuRef}
+              onBlur={event => {
+                if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) {
+                  setConvMenuOpen(false)
+                }
+              }}>
               <button
                 type="button"
+                ref={convTriggerRef}
                 className={styles.convTrigger}
-                onClick={() => setConvMenuOpen(o => !o)}
-                aria-haspopup="listbox"
+                onClick={() => {
+                  if (!convMenuOpen) setExpandedConvGroups({})
+                  setConvMenuOpen(o => !o)
+                }}
+                aria-controls={convMenuOpen ? convMenuId : undefined}
                 aria-expanded={convMenuOpen}
                 title={t('athena.conversation')}
               >
@@ -943,11 +967,12 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
               </button>
 
               {convMenuOpen && (
-                <div className={styles.convMenu} role="listbox">
+                <div id={convMenuId} className={styles.convMenu} role="region" aria-label={t('athena.conversation')}>
                   <button
                     type="button"
                     className={styles.convNew}
-                    disabled={isStreaming}
+                    title={t('athena.newChatInCourse').replace('{course}', currentCourse?.name || currentConversation?.courseName || t('athena.groupGeneral'))}
+                    disabled={isStreaming || attachmentBusy}
                     onClick={() => {
                       createConversation(groupCourseId)
                       setConvMenuOpen(false)
@@ -957,18 +982,23 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                     <span>{t('athena.newChat')}</span>
                   </button>
                   <div className={styles.convList}>
-                    {conversationGroups.map(group => (
-                      <section key={group.courseId ?? '__general'}
-                        className={`${styles.convGroup} ${group.active ? styles.convGroupActive : ''}`}
+                    {conversationGroups.map(group => {
+                      const groupKey = group.courseId ?? '__general'
+                      const expanded = expandedConvGroups[groupKey] ?? group.active
+                      const bodyId = `${convMenuId}-${groupKey}`
+                      return (
+                      <section key={groupKey}
+                        className={styles.convGroup}
                         data-active-group={group.active ? 'true' : undefined}
                         aria-label={`会话分组：${group.title}`}>
                         <div className={styles.convGroupHeader}>
-                          <span className={styles.convGroupIcon} aria-hidden="true">{group.courseId ? <BookOpen size={13} strokeWidth={2} /> : <MessageCircle size={13} strokeWidth={2} />}</span>
-                          <span className={styles.convGroupName}>
-                            <span title={group.title}>{group.title}</span>
-                            {group.courseId && <em>{t('athena.groupScoped')}</em>}
-                          </span>
-                          <span className={styles.convGroupCount} aria-label={`${group.conversations.length} 个会话`}>{group.conversations.length}</span>
+                          <button type="button" className={styles.convGroupToggle}
+                            aria-expanded={expanded} aria-controls={bodyId}
+                            onClick={() => setExpandedConvGroups(previous => ({ ...previous, [groupKey]: !expanded }))}>
+                            <ChevronDown size={13} strokeWidth={1.8} className={`${styles.convGroupChevron} ${expanded ? styles.convGroupChevronOpen : ''}`} aria-hidden="true" />
+                            <span className={styles.convGroupName} title={group.title}>{group.title}</span>
+                            <span className={styles.convGroupCount} aria-label={`${group.conversations.length} 个会话`}>{group.conversations.length}</span>
+                          </button>
                           <button type="button" className={styles.convGroupNew} disabled={isStreaming || attachmentBusy}
                             title={t('athena.newChatInCourse').replace('{course}', group.title)}
                             aria-label={t('athena.newChatInCourse').replace('{course}', group.title)}
@@ -976,12 +1006,9 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                             <Plus size={13} strokeWidth={2.4} />
                           </button>
                         </div>
-                        <div className={styles.convGroupBody}>
+                        <div id={bodyId} className={styles.convGroupBody} hidden={!expanded}>
                         {group.conversations.length === 0 ? (
-                          <button type="button" className={styles.convEmptyRow} disabled={isStreaming || attachmentBusy}
-                            onClick={() => { createConversation(group.courseId); setConvMenuOpen(false) }}>
-                            <Plus size={12} strokeWidth={2.2} />{t('athena.newChat')}
-                          </button>
+                          <p className={styles.convEmptyRow}>暂无会话</p>
                         ) : group.conversations.map(conv => (
                       <div
                         key={conv.id}
@@ -1013,14 +1040,15 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                         ) : <button
                           type="button"
                           className={styles.convItemMain}
-                          disabled={isStreaming}
+                          aria-current={conv.id === currentId ? 'true' : undefined}
+                          title={conv.title || t('athena.newChat')}
+                          disabled={isStreaming || attachmentBusy}
                           onClick={() => {
                             switchConversation(conv.id)
                             setConvMenuOpen(false)
                           }}
                         >
                           <span className={styles.convItemTitle}>
-                            {conv.id === currentId && <Check size={13} strokeWidth={2.6} className={styles.convItemCheck} aria-label={t('athena.currentConversation')} />}
                             {conv.title || t('athena.newChat')}
                           </span>
                           <span className={styles.convItemMeta}>
@@ -1051,9 +1079,14 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                         <button
                           type="button"
                           className={styles.convDelete}
-                          disabled={isStreaming}
+                          disabled={isStreaming || attachmentBusy}
                           title={t('athena.deleteChat')}
-                          onClick={() => deleteConversation(conv.id)}
+                          aria-label={`${t('athena.deleteChat')}：${conv.title || t('athena.newChat')}`}
+                          onClick={() => {
+                            if (window.confirm(`确定删除会话“${conv.title || t('athena.newChat')}”？此操作无法撤销。`)) {
+                              deleteConversation(conv.id)
+                            }
+                          }}
                         >
                           <Trash2 size={13} strokeWidth={1.9} />
                         </button>
@@ -1061,8 +1094,10 @@ export default function AIChatPage({ visible = true }: { visible?: boolean }) {
                     ))}
                         </div>
                       </section>
-                    ))}
+                      )
+                    })}
                   </div>
+                  <p className={styles.convMenuHint}>读取所属课程课件，每个会话独立保存记忆</p>
                 </div>
               )}
             </div>

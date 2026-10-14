@@ -1,295 +1,71 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import {
-  Key,
-  HardDrive,
-  Info,
-  ChevronRight,
-  Sparkles,
-  Sun,
-  Moon,
-  Globe,
-  Check,
-  Briefcase,
-  Info as InfoIcon,
-  GraduationCap,
-  Type,
-} from 'lucide-react'
-import { useCourseStore } from '@stores/courseStore'
+import { Moon, Sun, RotateCcw, ExternalLink } from 'lucide-react'
 import { useThemeStore } from '@stores/themeStore'
 import { useLanguageStore, LANGUAGES } from '@stores/languageStore'
-import {
-  UI_FONT_SCALE_DEFAULT,
-  UI_FONT_SCALE_MAX,
-  UI_FONT_SCALE_MIN,
-  UI_FONT_SCALE_STEP,
-  useSettingsStore,
-} from '@stores/settingsStore'
+import { UI_FONT_SCALE_DEFAULT, UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX, UI_FONT_SCALE_STEP, useSettingsStore } from '@stores/settingsStore'
 import { useOnboardingStore } from '@stores/onboardingStore'
-import type { Language } from '@stores/languageStore'
 import { useT } from '../i18n'
-import type { TranslationKey } from '../i18n'
-import styles from './SettingsPage.module.css'
+import packageJson from '../../package.json'
+import styles from './settings/SettingsDialog.module.css'
 
-export default function SettingsPage() {
-  const navigate = useNavigate()
-  const courses = useCourseStore(s => s.courses)
-
+export default function SettingsPage({ onClose }: { onClose?: () => void }) {
   const theme = useThemeStore(s => s.theme)
   const setTheme = useThemeStore(s => s.setTheme)
   const language = useLanguageStore(s => s.language)
   const setLanguage = useLanguageStore(s => s.setLanguage)
-  const isTeacher = useSettingsStore(s => s.isTeacher)
-  const setIsTeacher = useSettingsStore(s => s.setIsTeacher)
-  const uiFontScale = useSettingsStore(s => s.uiFontScale)
-  const setUiFontScale = useSettingsStore(s => s.setUiFontScale)
+  const settings = useSettingsStore()
   const restartGuide = useOnboardingStore(s => s.restartGuide)
   const t = useT()
-
-  const [pendingLang, setPendingLang] = useState<Language>(language)
-  const [langApplied, setLangApplied] = useState(false)
-  const fontScalePercent = Math.round(uiFontScale * 100)
-
-  const handleApplyLanguage = () => {
-    setLanguage(pendingLang)
-    setLangApplied(true)
-    window.setTimeout(() => setLangApplied(false), 2000)
-  }
-
-  // 统计数据
-  const totalCourses = courses.filter(b => b.course.status === 'ready').length
-  const totalFiles = courses.reduce((sum, b) => sum + b.course.files.length, 0)
-
-  const navCards: { path: string; icon: typeof Key; titleKey: TranslationKey; descKey: TranslationKey }[] = [
-    {
-      path: '/settings/api',
-      icon: Key,
-      titleKey: 'settings.api',
-      descKey: 'settings.apiDesc',
-    },
-    {
-      path: '/settings/storage',
-      icon: HardDrive,
-      titleKey: 'settings.storage',
-      descKey: 'settings.storageDesc',
-    },
-    {
-      path: '/settings/about',
-      icon: Info,
-      titleKey: 'settings.about',
-      descKey: 'settings.aboutDesc',
-    },
-  ]
-
-  return (
-    <div className={styles.container}>
-      <header className={styles.header}>
-        <h1 className={styles.title}>{t('settings.title')}</h1>
-        <p className={styles.subtitle}>{t('settings.subtitle')}</p>
-      </header>
-
-      {/* 1. 应用信息卡片 */}
-      <section className={`liquid-glass ${styles.card}`}>
-        <div className={styles.appInfoTop}>
-          <div className={styles.appLogo}>
-            <Sparkles size={24} strokeWidth={1.8} />
-          </div>
-          <div className={styles.appInfoText}>
-            <h2 className={styles.appName}>ChillPass</h2>
-            <p className={styles.appDesc}>{t('settings.appDesc')}</p>
+  return <div className={styles.general}>
+    <section className={styles.intro}>
+      <h2>常规</h2>
+      <p>ChillPass，让课件变成可以一步步完成的学习任务。</p>
+      <p className={styles.muted}>课程、学习进度与对话保存在本机。AI 请求由你选择的模型服务处理。</p>
+      <div className={styles.actions} style={{ marginTop: 10 }}>
+        <span className={styles.button}>版本 {packageJson.version}</span>
+        <a className={styles.button} href="https://github.com/CYRickyArAr/ChillPass" target="_blank" rel="noreferrer">项目地址 <ExternalLink size={14} /></a>
+      </div>
+    </section>
+    <div className={styles.generalColumns}>
+      <section className={styles.section}>
+        <h3>{t('settings.appearance')}</h3>
+        <div className={styles.segmented} aria-label={t('settings.theme')}>
+          <button type="button" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}><Sun size={21} />{t('settings.themeLight')}</button>
+          <button type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}><Moon size={21} />{t('settings.themeDark')}</button>
+        </div>
+        <div className={styles.row}>
+          <label htmlFor="settings-font-size">{t('settings.uiFontSize')}</label>
+          <div className={styles.actions}>
+            <span className={styles.muted}>{Math.round(settings.uiFontScale * 100)}%</span>
+            <button className={styles.iconButton} type="button" onClick={() => settings.setUiFontScale(UI_FONT_SCALE_DEFAULT)} title={t('settings.uiFontSizeReset')} aria-label={t('settings.uiFontSizeReset')}><RotateCcw size={17} /></button>
           </div>
         </div>
-
-        <div className={styles.statRow}>
-          <div className={styles.statItem}>
-            <span className={styles.statNum}>{totalCourses}</span>
-            <span className={styles.statLabel}>{t('settings.statsCourses')}</span>
-          </div>
-          <div className={styles.statItem}>
-            <span className={styles.statNum}>{totalFiles}</span>
-            <span className={styles.statLabel}>{t('settings.statsFiles')}</span>
-          </div>
+        <input id="settings-font-size" className={styles.range} type="range" min={UI_FONT_SCALE_MIN} max={UI_FONT_SCALE_MAX} step={UI_FONT_SCALE_STEP} value={settings.uiFontScale} onChange={event => settings.setUiFontScale(Number(event.target.value))} />
+        <p className={styles.muted} title={t('settings.uiFontSizeDesc')}>调整整个应用的文字大小，立即生效。</p>
+        <h3 style={{ marginTop: 10 }}>学习与生成</h3>
+        <div className={styles.row}>
+          <div className={styles.rowCopy}><span>{t('progress.economyLessons')}</span><small title={t('progress.economyLessonsHint')}>精简单次生成内容，减少模型用量。</small></div>
+          <button type="button" role="switch" className={styles.switch} aria-checked={settings.economyLessons} aria-label={t('progress.economyLessons')} onClick={() => settings.setEconomyLessons(!settings.economyLessons)} />
+        </div>
+        <div className={styles.row}>
+          <div className={styles.rowCopy}><span>{t('settings.teacher')}</span><small>{settings.isTeacher ? t('settings.teacherOn') : t('settings.teacherOff')}</small></div>
+          <button type="button" role="switch" className={styles.switch} aria-checked={settings.isTeacher} aria-label={t('settings.teacher')} onClick={() => settings.setIsTeacher(!settings.isTeacher)} />
         </div>
       </section>
-
-      {/* 2. 本地信息卡片 */}
-      <section className={`liquid-glass ${styles.card}`}>
-        <div className={styles.cardHeader}>
-          <h2 className={styles.cardTitle}>{t('settings.localInfo')}</h2>
-          <p className={styles.cardDesc}>{t('settings.localInfoDesc')}</p>
+      <section className={styles.section}>
+        <h3>{t('settings.language')}</h3>
+        <div className={styles.languageList}>
+          {LANGUAGES.map(item => <label className={styles.language} key={item.code}>
+            <input type="radio" name="settings-language" checked={language === item.code} onChange={() => setLanguage(item.code)} />
+            <span>{item.label}</span><code>{item.code}</code>
+          </label>)}
         </div>
-        <div className={styles.localInfoContent}>
-          <InfoIcon size={20} strokeWidth={1.8} className={styles.localInfoIcon} />
-          <div className={styles.localInfoText}>
-            <span className={styles.localInfoTitle}>{t('settings.localDataTitle')}</span>
-            <span className={styles.localInfoDesc}>{t('settings.localDataDesc')}</span>
-          </div>
-          <button className={styles.localInfoBtn} onClick={() => navigate('/settings/storage')}>
-            <HardDrive size={16} strokeWidth={2} />
-            {t('settings.storage')}
-            <ChevronRight size={16} strokeWidth={2} />
-          </button>
+        <h3 style={{ marginTop: 10 }}>使用帮助</h3>
+        <div className={styles.row}>
+          <div className={styles.rowCopy}><span>{t('settings.reviewGuide')}</span><small>{t('settings.reviewGuideDesc')}</small></div>
+          <button type="button" className={styles.button} onClick={() => { onClose?.(); restartGuide() }}>查看引导</button>
         </div>
       </section>
-
-      {/* 3. 外观与语言 */}
-      <section className={`liquid-glass ${styles.card}`}>
-        <div className={styles.cardHeader}>
-          <h2 className={styles.cardTitle}>{t('settings.appearance')}</h2>
-          <p className={styles.cardDesc}>{t('settings.appearanceDesc')}</p>
-        </div>
-
-        <div className={styles.appearanceRow}>
-          <span className={styles.appearanceLabel}>
-            <Sun size={16} strokeWidth={2} />
-            {t('settings.theme')}
-          </span>
-          <div className={styles.themeToggle}>
-            <button
-              type="button"
-              className={`${styles.themeOption} ${theme === 'light' ? styles.themeOptionActive : ''}`}
-              onClick={() => setTheme('light')}
-            >
-              <Sun size={14} strokeWidth={2} />
-              {t('settings.themeLight')}
-            </button>
-            <button
-              type="button"
-              className={`${styles.themeOption} ${theme === 'dark' ? styles.themeOptionActive : ''}`}
-              onClick={() => setTheme('dark')}
-            >
-              <Moon size={14} strokeWidth={2} />
-              {t('settings.themeDark')}
-            </button>
-          </div>
-        </div>
-
-        <div className={styles.appearanceRow}>
-          <span className={styles.appearanceLabel}>
-            <Globe size={16} strokeWidth={2} />
-            {t('settings.language')}
-          </span>
-          <div className={styles.langGrid}>
-            {LANGUAGES.map(lang => (
-              <button
-                key={lang.code}
-                type="button"
-                className={`${styles.langOption} ${pendingLang === lang.code ? styles.langOptionActive : ''}`}
-                onClick={() => setPendingLang(lang.code)}
-              >
-                <span className={styles.langFlag}>{lang.flag}</span>
-                <span className={styles.langLabel}>{lang.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {pendingLang !== language && (
-          <div className={styles.langApplyRow}>
-            {langApplied && (
-              <span className={styles.langAppliedHint}>{t('settings.applied')}</span>
-            )}
-            <button
-              type="button"
-              className={styles.langApplyBtn}
-              onClick={handleApplyLanguage}
-            >
-              <Check size={15} strokeWidth={2.4} />
-              {t('settings.applyLanguage')}
-            </button>
-          </div>
-        )}
-
-        <div className={styles.appearanceRow}>
-          <span className={styles.appearanceLabel}>
-            <Type size={16} strokeWidth={2} />
-            {t('settings.uiFontSize')}
-          </span>
-          <div className={styles.fontSizeControl}>
-            <input
-              className={styles.fontSizeSlider}
-              type="range"
-              min={UI_FONT_SCALE_MIN}
-              max={UI_FONT_SCALE_MAX}
-              step={UI_FONT_SCALE_STEP}
-              value={uiFontScale}
-              aria-label={t('settings.uiFontSize')}
-              onChange={(event) => setUiFontScale(Number(event.currentTarget.value))}
-            />
-            <span className={styles.fontSizeValue}>{fontScalePercent}%</span>
-            <button
-              type="button"
-              className={styles.fontSizeReset}
-              onClick={() => setUiFontScale(UI_FONT_SCALE_DEFAULT)}
-              disabled={uiFontScale === UI_FONT_SCALE_DEFAULT}
-            >
-              {t('settings.uiFontSizeReset')}
-            </button>
-          </div>
-        </div>
-        <p className={styles.fontSizeDesc}>{t('settings.uiFontSizeDesc')}</p>
-      </section>
-
-      {/* 4. 新手引导重看入口 */}
-      <section className={`liquid-glass ${styles.card}`}>
-        <div className={styles.localInfoContent}>
-          <GraduationCap size={20} strokeWidth={1.8} className={styles.localInfoIcon} />
-          <div className={styles.localInfoText}>
-            <span className={styles.localInfoTitle}>{t('settings.reviewGuide')}</span>
-            <span className={styles.localInfoDesc}>{t('settings.reviewGuideDesc')}</span>
-          </div>
-          <button
-            className={styles.localInfoBtn}
-            onClick={() => {
-              restartGuide()
-              navigate('/')
-            }}
-          >
-            {t('settings.reviewGuide')}
-            <ChevronRight size={16} strokeWidth={2} />
-          </button>
-        </div>
-      </section>
-
-      {/* 5. 导航卡片网格 */}
-      <section className={styles.navGrid}>
-        {navCards.map(item => {
-          const Icon = item.icon
-          return (
-            <button
-              key={item.path}
-              className={`liquid-glass ${styles.navCard}`}
-              onClick={() => navigate(item.path)}
-            >
-              <div className={styles.navCardIcon}>
-                <Icon size={20} strokeWidth={1.8} />
-              </div>
-              <div className={styles.navCardText}>
-                <span className={styles.navCardTitle}>{t(item.titleKey)}</span>
-                <span className={styles.navCardDesc}>{t(item.descKey)}</span>
-              </div>
-              <ChevronRight size={18} strokeWidth={2} className={styles.navCardArrow} />
-            </button>
-          )
-        })}
-        {/* 身份设置卡片 - 点击切换教师模式 */}
-        <button
-          className={`liquid-glass ${styles.navCard} ${isTeacher ? styles.navCardActive : ''}`}
-          onClick={() => setIsTeacher(!isTeacher)}
-        >
-          <div className={styles.navCardIcon}>
-            <Briefcase size={20} strokeWidth={1.8} />
-          </div>
-          <div className={styles.navCardText}>
-            <span className={styles.navCardTitle}>{t('settings.teacher')}</span>
-            <span className={styles.navCardDesc}>{isTeacher ? t('settings.teacherOn') : t('settings.teacherOff')}</span>
-          </div>
-          <div className={styles.teacherToggleSmall}>
-            <span className={`${styles.teacherToggleThumbSmall} ${isTeacher ? styles.teacherToggleThumbSmallActive : ''}`} />
-          </div>
-        </button>
-      </section>
-
     </div>
-  )
+    <p className={styles.muted}>常规选项即时生效，无需保存。</p>
+  </div>
 }

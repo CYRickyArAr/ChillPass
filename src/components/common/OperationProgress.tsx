@@ -17,7 +17,7 @@ function useClock(running: boolean) {
   return now
 }
 
-export function OperationProgressCard({ item, now = Date.now() }: { item: Progress; now?: number }) {
+export function OperationProgressCard({ item, now = Date.now(), compact = false }: { item: Progress; now?: number; compact?: boolean }) {
   const t = useT()
   const active = isOperationActive(item)
   const countKnown = typeof item.total === 'number' && item.total > 0
@@ -27,15 +27,19 @@ export function OperationProgressCard({ item, now = Date.now() }: { item: Progre
   const seconds = Math.max(0, Math.floor(((item.finishedAt ?? now) - item.startedAt) / 1000))
   const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
   return (
-    <div className={styles.card}>
+    <div className={`${styles.card} ${compact ? styles.compactCard : ''}`}>
       <div className={styles.heading}>
-        <strong>{t(`progress.${item.kind}`)}{item.detail && ` · ${item.detail}`}</strong>
+        <strong title={compact ? `${t(`progress.${item.kind}`)}${item.detail ? ` · ${item.detail}` : ''}` : undefined}>{t(`progress.${item.kind}`)}{item.detail && ` · ${item.detail}`}</strong>
         {known && <span className={styles.percent}>{percent}%</span>}
       </div>
+      {compact && <div className={styles.statusLine}>
+        <span className={styles.statusText} title={t(`progress.${item.stage}`)}>{t(`progress.${item.stage}`)}</span>
+        {item.startedAt > 0 && <span className={styles.elapsed}>{t('progress.elapsed').replace('{time}', time)}</span>}
+      </div>}
       <div className={styles.meta}>
-        <span>{t(`progress.${item.stage}`)}</span>
+        {!compact && <span>{t(`progress.${item.stage}`)}</span>}
         {countKnown && <span>{t('progress.count').replace('{current}', String(item.current ?? 0)).replace('{total}', String(item.total))} {item.unit ? t(`progress.${item.unit}`) : ''}</span>}
-        {item.startedAt > 0 && <span>{t('progress.elapsed').replace('{time}', time)}</span>}
+        {!compact && item.startedAt > 0 && <span>{t('progress.elapsed').replace('{time}', time)}</span>}
         {!!item.attempt && active && <span>{t(item.maxAttempts ? 'progress.attempt' : 'progress.requestNumber').replace('{current}', String(item.attempt)).replace('{total}', String(item.maxAttempts))}</span>}
         {!!item.validationRetry && <span>{t('progress.validationRetry').replace('{count}', String(item.validationRetry))}</span>}
         {!!item.truncationRetries && <span>{t('progress.truncationRetries').replace('{count}', String(item.truncationRetries))}</span>}
@@ -47,18 +51,22 @@ export function OperationProgressCard({ item, now = Date.now() }: { item: Progre
       </div>
       {item.localMerge && <div className={styles.source}>{t('progress.localMerge')}</div>}
       {item.retryHint && <div className={styles.source}>{item.retryHint}</div>}
-      {item.error && <div className={`${styles.source} ${styles.warning}`} role="status">{t('progress.failureReason')} {item.error}</div>}
+      {item.error && (compact && !active
+        ? <details className={`${styles.source} ${styles.warning} ${styles.errorDetails}`}>
+            <summary className={styles.errorPreview} title={t('progress.errorDetails')}>{t('progress.failureReason')} {item.error}</summary>
+          </details>
+        : <div className={`${styles.source} ${styles.warning}`} role="status">{t('progress.failureReason')} {item.error}</div>)}
       {!!item.skippedSources?.length && <div className={`${styles.source} ${styles.warning}`}>{t('progress.skippedSources').replace('{names}', item.skippedSources.join('、'))}</div>}
       {item.source && <div className={styles.source}>
         {item.fileTotal ? `${t('progress.file').replace('{current}', String(item.fileIndex ?? 1)).replace('{total}', String(item.fileTotal))} · ` : ''}
         {item.source}
         {item.chunkTotal ? ` · ${t('progress.chunk').replace('{current}', String(item.chunkIndex ?? 1)).replace('{total}', String(item.chunkTotal))}` : ''}
       </div>}
-      <div className={styles.bar} role="progressbar" aria-label={t(`progress.${item.kind}`)}
+      {(!compact || active) && <div className={styles.bar} role="progressbar" aria-label={t(`progress.${item.kind}`)}
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={t(`progress.${item.stage}`)}>
         <div className={`${styles.fill} ${!known && active ? styles.indeterminate : ''}`}
           style={known ? { width: `${percent}%` } : !active ? { width: item.stage === 'done' ? '100%' : '0%' } : undefined} />
-      </div>
+      </div>}
     </div>
   )
 }
@@ -121,6 +129,7 @@ export default function OperationProgressCenter() {
   const items = useOperationProgressStore(s => s.items)
   const expanded = useOperationProgressStore(s => s.expanded)
   const setExpanded = useOperationProgressStore(s => s.setExpanded)
+  const clearFinished = useOperationProgressStore(s => s.clearFinished)
   const trayRef = useRef<HTMLElement | null>(null)
   const courses = useCourseStore(s => s.courses)
   const currentCourseId = useCourseStore(s => s.currentCourseId)
@@ -199,6 +208,7 @@ export default function OperationProgressCenter() {
   const trayPercent = grandTotal > 0 ? Math.min(100, Math.max(0, Math.floor((currentTotal / grandTotal) * 100))) : undefined
   const badgeCount = running > 0 ? running : Math.min(visible.length, 99)
   const subtitle = running > 0 ? t('progress.active').replace('{count}', String(running)) : t('progress.history')
+  const canClear = items.some(item => item.stage === 'failed' || item.stage === 'interrupted')
   return (
     <section className={styles.tray} aria-label={t('progress.title')} ref={trayRef}>
       <button
@@ -207,6 +217,7 @@ export default function OperationProgressCenter() {
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
         aria-controls="operation-progress-popover"
+        aria-label={`${t('progress.title')} · ${subtitle}`}
         title={`${t('progress.title')} · ${subtitle}`}
       >
         <span className={styles.iconShell} aria-hidden="true">
@@ -225,19 +236,17 @@ export default function OperationProgressCenter() {
       </button>
       {expanded && (
         <div id="operation-progress-popover" className={styles.popover} role="dialog" aria-label={t('progress.title')}>
-          <div className={styles.popoverHeader}>
-            <div>
-              <strong>{t('progress.title')}</strong>
-              <span>{subtitle}</span>
-            </div>
-            {trayPercent !== undefined && <b>{trayPercent}%</b>}
-          </div>
-          <ReadyLessonNotice key={currentCourseId} bundle={currentBundle} />
-          {visible.length > 0 && (
+          <div className={styles.popoverBody}>
+            <ReadyLessonNotice key={currentCourseId} bundle={currentBundle} />
             <div id="operation-progress-list" className={styles.list}>
-              {visible.map(item => <OperationProgressCard key={item.id} item={item} now={now} />)}
+              {visible.map(item => <OperationProgressCard key={item.id} item={item} now={now} compact />)}
             </div>
-          )}
+          </div>
+          {canClear && <div className={styles.popoverFooter}>
+            <button type="button" className={styles.clearButton} onClick={clearFinished} title={t('progress.clearFinishedHint')}>
+              {t('progress.clearFinished')}
+            </button>
+          </div>}
         </div>
       )}
     </section>

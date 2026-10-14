@@ -144,9 +144,21 @@ async function main() {
   await rm(BUILD_DIR, { recursive: true, force: true })
   await mkdir(BUILD_DIR, { recursive: true })
   const dataStorageSource = readFileSync(join(__dirname, 'data-storage.cjs'), 'utf8')
+  const codexUsageSource = readFileSync(join(__dirname, 'codex-usage.cjs'), 'utf8')
+  const chatGPTSource = readFileSync(join(__dirname, 'chatgpt-auth.cjs'), 'utf8').replace(
+    "require('./codex-usage.cjs')",
+    () => `(() => { const module = { exports: {} }; ${codexUsageSource}\nreturn module.exports; })()`,
+  )
+  const goSource = readFileSync(join(__dirname, 'opencode-go.cjs'), 'utf8')
   const appSource = readFileSync(APP_SRC, 'utf8').replace(
     "require('./data-storage.cjs')",
     () => `(() => { const module = { exports: {} }; ${dataStorageSource}\nreturn module.exports; })()`,
+  ).replace(
+    "require('./chatgpt-auth.cjs')",
+    () => `(() => { const module = { exports: {} }; ${chatGPTSource}\nreturn module.exports; })()`,
+  ).replace(
+    "require('./opencode-go.cjs')",
+    () => `(() => { const module = { exports: {} }; ${goSource}\nreturn module.exports; })()`,
   )
   await writeFile(APP_DST, appSource)
 

@@ -29,7 +29,7 @@ export async function* readAiEvents(response: Response, signal?: AbortSignal): A
           data = []
           if (payload === '[DONE]') return
           const event = JSON.parse(payload)
-          if (event.error) throw new Error(String(event.error.message || 'AI stream error'))
+          if (event.error) throw new Error(`${event.error.code ? `(${event.error.code}) ` : ''}${String(event.error.message || 'AI stream error')}`)
           yield event
         }
       }

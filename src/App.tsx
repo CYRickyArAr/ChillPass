@@ -24,11 +24,8 @@ import LessonPathPage from './pages/LessonPathPage'
 import LessonDetailPage from './pages/LessonDetailPage'
 import { LegacyAthenaRoute } from './components/athena/AthenaDrawer'
 import WrongBookPage from './pages/WrongBookPage'
-import SettingsPage from './pages/SettingsPage'
 import TeacherWorkspace from './pages/TeacherWorkspace'
-import ApiSettings from './pages/settings/ApiSettings'
-import StorageSettings from './pages/settings/StorageSettings'
-import AboutSettings from './pages/settings/AboutSettings'
+import SettingsDialog from './pages/settings/SettingsDialog'
 import styles from './App.module.css'
 import { useT } from './i18n'
 import type { UpdateInfo } from './types'
@@ -84,6 +81,10 @@ function PageContainer({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const location = useLocation()
+  const settingsOpen = location.pathname === '/settings' || location.pathname.startsWith('/settings/')
+  const lastWorkspaceLocation = useRef({ ...location, pathname: '/', search: '', hash: '' })
+  if (!settingsOpen) lastWorkspaceLocation.current = location
+  const workspaceLocation = settingsOpen ? lastWorkspaceLocation.current : location
   const ensureAccount = useAuthStore(s => s.ensureAccount)
   const courses = useCourseStore(s => s.courses)
   const currentCourseId = useCourseStore(s => s.currentCourseId)
@@ -102,12 +103,11 @@ export default function App() {
   const [storagePromptPath, setStoragePromptPath] = useState('')
   const [storagePromptBusy, setStoragePromptBusy] = useState(false)
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null)
-  const workspaceTitle = location.pathname.startsWith('/lessons')
+  const workspaceTitle = workspaceLocation.pathname.startsWith('/lessons')
     ? courseName || t('nav.lessons')
-    : location.pathname.startsWith('/settings') ? t('nav.settings')
-    : location.pathname === '/upload' ? t('nav.upload')
-    : location.pathname === '/wrongbook' ? t('nav.wrongbook')
-    : location.pathname === '/teacher' ? t('sidebar.workspace')
+    : workspaceLocation.pathname === '/upload' ? t('nav.upload')
+    : workspaceLocation.pathname === '/wrongbook' ? t('nav.wrongbook')
+    : workspaceLocation.pathname === '/teacher' ? t('sidebar.workspace')
     : t('nav.dashboard')
   // 弹窗打开时显示全局高斯模糊层（内联样式，行为确定）
   const blurActive = useGlobalBlurActive()
@@ -261,7 +261,7 @@ export default function App() {
               </div>
             </header>
             <main className={styles.main}>
-              <Routes location={location} key={location.pathname}>
+              <Routes location={workspaceLocation} key={workspaceLocation.pathname}>
                 <Route path="/" element={<PageContainer><Dashboard /></PageContainer>} />
                 <Route path="/upload" element={<PageContainer><UploadPage /></PageContainer>} />
                 <Route path="/lessons" element={<PageContainer><LessonPathPage /></PageContainer>} />
@@ -269,11 +269,6 @@ export default function App() {
                 <Route path="/chat" element={<LegacyAthenaRoute />} />
                 <Route path="/teacher" element={<PageContainer><TeacherWorkspace /></PageContainer>} />
                 <Route path="/wrongbook" element={<PageContainer><WrongBookPage /></PageContainer>} />
-                <Route path="/settings" element={<PageContainer><SettingsPage /></PageContainer>} />
-                <Route path="/settings/api" element={<PageContainer><ApiSettings /></PageContainer>} />
-                <Route path="/settings/storage" element={<PageContainer><StorageSettings /></PageContainer>} />
-                <Route path="/settings/data" element={<Navigate to="/settings/storage" replace />} />
-                <Route path="/settings/about" element={<PageContainer><AboutSettings /></PageContainer>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </main>
@@ -298,6 +293,7 @@ export default function App() {
           </div>
         </aside>
       )}
+      {settingsOpen && <SettingsDialog pathname={location.pathname} returnTo={`${workspaceLocation.pathname}${workspaceLocation.search}${workspaceLocation.hash}`} />}
       {/* 首次使用欢迎向导 */}
       <WelcomeModal />
       {storagePromptOpen && (

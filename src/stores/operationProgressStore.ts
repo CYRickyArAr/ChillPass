@@ -52,6 +52,7 @@ interface OperationState {
   patch: (id: string, patch: ProgressPatch) => void
   finishMatching: (predicate: (item: OperationProgress) => boolean, stage: Extract<OperationStage, 'cancelled' | 'interrupted' | 'failed' | 'done'>) => void
   setExpanded: (expanded: boolean) => void
+  clearFinished: () => void
 }
 
 export const useOperationProgressStore = create<OperationState>()(persist((set) => ({
@@ -86,6 +87,10 @@ export const useOperationProgressStore = create<OperationState>()(persist((set) 
     }
   }),
   setExpanded: expanded => set({ expanded }),
+  // 只移除失败/中断请求；保留运行任务及成功记录，避免清除后旧课程失败记录重新出现。
+  clearFinished: () => set(state => ({
+    items: state.items.filter(item => item.stage !== 'failed' && item.stage !== 'interrupted'),
+  })),
 }), {
   name: 'chillpass-operation-progress',
   version: 1,

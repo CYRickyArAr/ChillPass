@@ -1823,23 +1823,21 @@
 
 .convMenu {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   left: 0;
   z-index: 40;
-  width: min(340px, calc(100vw - 32px));
-  max-height: min(70vh, 460px);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(70dvh, 460px);
+  overflow: hidden;
   padding: 6px;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  border: 1px solid var(--control-border);
   background: #ffffff;
   box-shadow: var(--shadow-float);
-  scrollbar-width: none;
-  animation: convMenuIn 0.18s cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-.convMenu::-webkit-scrollbar {
-  display: none;
+  animation: convMenuIn 0.16s ease-out;
 }
 
 @keyframes convMenuIn {
@@ -1850,96 +1848,96 @@
 .convNew {
   display: flex;
   align-items: center;
-  gap: 7px;
+  flex-shrink: 0;
+  gap: 8px;
   width: 100%;
-  padding: 9px 11px;
+  min-height: 38px;
+  padding: 8px 10px;
   border: none;
-  border-radius: var(--radius-sm);
-  background: rgba(0, 113, 227, 0.08);
+  border-radius: 6px;
+  background: transparent;
   color: var(--accent-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 1.5;
   font-family: inherit;
   cursor: pointer;
-  margin-bottom: 4px;
 }
 
-.convNew:hover {
-  background: rgba(0, 113, 227, 0.14);
+.convNew:hover:not(:disabled) {
+  background: var(--surface-subtle);
 }
 
-/* ===== 会话分组 =====
-   课程作为分组标题（背景条 + 图标 + 计数），会话缩进显示，层级一眼可见。 */
+/* 课程标题只负责折叠；唯一的强调色标记留给当前会话。 */
 .convList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--control-border);
+  scrollbar-width: thin;
+  scrollbar-color: var(--control-border-strong) transparent;
 }
 
-.convGroup {
-  border-radius: var(--radius-sm);
-  background: rgba(128, 128, 128, .06);
-  padding: 2px 2px 4px;
-}
-
-.convGroupActive {
-  background: rgba(0, 113, 227, .09);
-  box-shadow: inset 0 0 0 1px rgba(0, 113, 227, .22);
+.convGroup + .convGroup {
+  border-top: 1px solid var(--control-border);
 }
 
 .convGroupHeader {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 6px 6px 8px;
-  font-size: 13px;
+  gap: 2px;
+  min-height: 38px;
+  padding-right: 2px;
 }
 
-.convGroupIcon {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: var(--text-secondary);
-}
-
-.convGroupActive .convGroupIcon {
-  color: var(--accent-text);
-}
-
-.convGroupName {
+.convGroupToggle {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   flex: 1;
   min-width: 0;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.35;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.convGroupName > :first-child {
+.convGroupToggle:hover {
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+}
+
+.convGroupChevron {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+  transition: transform .15s ease;
+}
+
+.convGroupChevronOpen { transform: rotate(0); }
+
+.convGroupName {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.convGroupName em {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 400;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .convGroupCount {
   flex-shrink: 0;
-  min-width: 20px;
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: rgba(128, 128, 128, .18);
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   font-size: 11px;
-  font-weight: 600;
-  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .convGroupNew {
@@ -1947,71 +1945,64 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 6px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background .16s ease, color .16s ease;
+  transition: background .16s ease, color .16s ease, opacity .16s ease;
 }
 
 .convGroupNew:hover:not(:disabled) {
-  background: rgba(0, 113, 227, .16);
-  color: var(--accent-text);
+  background: var(--surface-subtle);
+  color: var(--text-primary);
 }
 
-.convGroupNew:disabled { opacity: .4; cursor: not-allowed; }
+.convGroupNew:where(:disabled) { opacity: .4; cursor: default; }
 
-/* 会话列表缩进，并用左侧竖线表明从属关系。 */
+/* 缩进体现课程归属，不再嵌套卡片或树状边框。 */
 .convGroupBody {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 0 4px 0 14px;
-  padding-left: 8px;
-  border-left: 2px solid rgba(128, 128, 128, .2);
+  margin: 0 0 6px 16px;
 }
+
+.convGroupBody[hidden] { display: none; }
 
 .convEmptyRow {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  margin: 0;
+  padding: 6px 12px 10px;
   color: var(--text-tertiary);
-  font: inherit;
   font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.convEmptyRow:hover:not(:disabled) { background: rgba(128, 128, 128, .12); color: var(--accent-text); }
-.convEmptyRow:disabled { opacity: .5; cursor: not-allowed; }
-
-.convItemCheck {
-  flex-shrink: 0;
-  margin-right: 4px;
-  vertical-align: -2px;
-  color: var(--accent-text);
+  line-height: 1.5;
 }
 
 .convItem {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  border-radius: var(--radius-sm);
+  gap: 2px;
+  padding-right: 3px;
+  border-radius: 6px;
 }
 
-.convItem:hover {
-  background: rgba(0, 0, 0, 0.04);
+.convItem:hover,
+.convItem:focus-within {
+  background: var(--surface-subtle);
 }
 
-.convItemActive {
-  background: rgba(0, 113, 227, 0.1);
+.convItemActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent-text);
 }
 
 .convItemMain {
@@ -2020,19 +2011,21 @@
   gap: 1px;
   flex: 1;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 8px 10px 8px 12px;
   border: none;
+  border-radius: 6px;
   background: transparent;
   text-align: left;
   font-family: inherit;
+  line-height: 1.5;
   cursor: pointer;
 }
 
 .convItemTitle {
-  display: flex;
-  align-items: center;
+  display: block;
+  max-width: 100%;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2041,6 +2034,7 @@
 
 .convItemActive .convItemTitle {
   color: var(--accent-text);
+  font-weight: 600;
 }
 
 .convItemMeta {
@@ -2073,18 +2067,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-right: 4px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: 6px;
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
   transition: background 0.18s ease, color 0.18s ease;
 }
 
-.convDelete:hover {
+.convDelete:hover:not(:disabled) {
   background: rgba(255, 59, 48, 0.12);
   color: var(--danger-text);
 }
@@ -2094,25 +2087,51 @@
   border-color: rgba(255, 255, 255, 0.14);
 }
 
-[data-theme="dark"] .convMenu {
-  background: rgba(30, 30, 32, 0.99);
-  border-color: rgba(255, 255, 255, 0.1);
+[data-theme="dark"] .convMenu,
+[data-theme="codex"] .convMenu {
+  background: #202020;
+  border-color: #383838;
 }
 
-[data-theme="dark"] .convGroup {
-  background: rgba(255, 255, 255, 0.05);
+.convMenuHint {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 9px 8px 3px;
+  border-top: 1px solid var(--control-border);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
-[data-theme="dark"] .convGroupActive {
-  background: rgba(0, 113, 227, 0.24);
+/* 鼠标悬停与键盘聚焦均可发现操作，触摸设备保持按钮可见。 */
+@media (hover: hover) and (pointer: fine) {
+  .convGroupNew,
+  .convRename,
+  .convDelete {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .convGroupHeader:hover .convGroupNew,
+  .convGroupHeader:focus-within .convGroupNew,
+  .convItem:hover .convRename,
+  .convItem:hover .convDelete,
+  .convItem:focus-within .convRename,
+  .convItem:focus-within .convDelete {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
-[data-theme="dark"] .convItem:hover {
-  background: rgba(255, 255, 255, 0.06);
+@media (hover: none), (pointer: coarse) {
+  .convGroupNew,
+  .convRename,
+  .convDelete { width: 36px; height: 36px; }
 }
 
-[data-theme="dark"] .convItemActive {
-  background: rgba(0, 113, 227, 0.22);
+@media (prefers-reduced-motion: reduce) {
+  .convMenu { animation: none; }
+  .convGroupChevron { transition: none; }
 }
 
 /* ===== Codex-inspired dark chat =====
@@ -2321,11 +2340,6 @@
   border: 1px solid #343434;
 }
 
-[data-theme="dark"] .convItemActive,
-[data-theme="codex"] .convItemActive {
-  background: rgba(65, 105, 178, 0.22);
-}
-
 @media (max-width: 700px) {
   [data-theme="dark"] .bubbleUser,
   [data-theme="codex"] .bubbleUser {
@@ -2370,7 +2384,8 @@
 .sideChat .headerBtn:hover:not(:disabled), .sideChat .clearBtn:hover:not(:disabled) { background: var(--surface-subtle); transform: none; }
 .sideChat .headerTaskBadge { margin-right: auto; }
 .sideChat button:disabled { cursor: default; }
-.sideChat .headerBtn:disabled, .sideChat .convNew:disabled, .sideChat .convItemMain:disabled, .sideChat .convDelete:disabled { opacity: 0.4; }
+.sideChat .headerBtn:disabled, .sideChat .convNew:disabled, .sideChat .convItemMain:disabled { opacity: 0.4; }
+.convDelete:disabled { color: var(--text-tertiary); cursor: default; }
 .sideChat button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .sideChat .messagesArea { padding: 0 16px; overscroll-behavior: contain; scrollbar-width: thin; }
 .sideChat .messagesList { gap: 24px; padding: 24px 0 16px; }

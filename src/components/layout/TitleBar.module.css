@@ -75,6 +75,9 @@
   .titleBar .providerBalancePill { max-width: 168px; }
   .titleBar .providerHalf { padding: 0 7px; }
   .titleBar .balanceHalf { padding: 0 7px; }
+  .titleBar .goQuotaPill { max-width: none; }
+  .titleBar .goQuotaPill .providerHalf span:not([data-provider-icon]) { display: none; }
+  .titleBar .goQuotaPill .balanceHalf { font-size: 12px; }
   .titleBar .focusBtn { padding: 0; width: 28px; min-width: 28px; justify-content: center; }
   .titleBar .focusBtn span { display: none; }
 }
@@ -134,7 +137,7 @@
   padding: 0 9px 0 10px;
 }
 
-.providerHalf span {
+.providerHalf span:not([data-provider-icon]) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -205,6 +208,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 8px;
   min-height: 32px;
   padding: 0 10px;
   border: none;

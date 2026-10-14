@@ -17,6 +17,9 @@ const { exec, spawn } = require('node:child_process');
 const os = require('node:os');
 const https = require('node:https');
 const { createDataStorage, migrateRoot } = require('./data-storage.cjs');
+const { createChatGPTAuth } = require('./chatgpt-auth.cjs');
+const { createOpenCodeGoProxy } = require('./opencode-go.cjs');
+const handleOpenCodeGo = createOpenCodeGoProxy();
 const handleLearningData = createDataStorage(() => courseStorageRoot);
 
 // ── Safe console (GUI subsystem has no valid stdout) ───────────
@@ -42,11 +45,12 @@ const APP_VERSION = (() => {
   } catch { /* Portable EXE has no package.json beside it. */ }
   return '0.1.2';
 })();
-const BUILD_ID = '20260922-local-learning-data';
+const BUILD_ID = '20261013-chatgpt-oauth';
 const GITHUB_REPO = 'CYRickyArAr/ChillPass';
 const DEFAULT_COURSE_STORAGE_ROOT = join(os.homedir(), 'Documents', 'ChillPass');
 const USER_CONFIG_DIR = process.env.CHILLPASS_CONFIG_DIR || join(os.homedir(), '.chillpass');
 const USER_CONFIG_PATH = join(USER_CONFIG_DIR, 'config.json');
+const handleChatGPT = createChatGPTAuth({ configDir: USER_CONFIG_DIR });
 let previousStorageRoots = [];
 function loadCourseStorageRoot() {
   try {
@@ -423,6 +427,8 @@ function sendJson(res, obj, status = 200) {
 }
 
 async function handleApi(req, res, urlPath) {
+  if (await handleChatGPT(req, res, urlPath)) return true;
+  if (await handleOpenCodeGo(req, res, urlPath)) return true;
   if (await handleLearningData(req, res, urlPath)) return true;
   const requestUrl = new URL(req.url, `http://localhost:${PORT}`);
   if (urlPath === '/api/fetchProviderModels' && req.method === 'POST') {

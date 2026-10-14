@@ -1,5 +1,16 @@
 /* ===== 设置子页面共享样式 ===== */
 
+/* Existing storage/about tools embedded in the flat settings dialog. */
+.subPage.embedded { max-width: none; width: 100%; margin: 0; padding: 0; gap: 30px; }
+.embedded .card { padding: 0 0 28px; border: 0; border-bottom: 1px solid var(--settings-border); border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; gap: 18px; }
+.embedded .card::before, .embedded .card::after { display: none; }
+.embedded .cardTitle { font-size: 18px; color: var(--settings-text); }
+.embedded .cardDesc { color: var(--settings-muted); }
+.embedded .primaryBtn, .embedded .ghostBtn, .embedded .linkBtn { border-radius: 6px; box-shadow: none; transform: none; }
+.embedded .primaryBtn { background: var(--settings-primary); color: var(--settings-on-primary); }
+.embedded .pathBox, .embedded .fileList { border-radius: 7px; background: var(--settings-panel); border-color: var(--settings-border); }
+
+
 .linkBtn {
   display: inline-flex;
   align-items: center;

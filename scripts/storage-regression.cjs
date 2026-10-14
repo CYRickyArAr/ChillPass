@@ -28,7 +28,7 @@ function environment({denied = false, storageRoot, oldServer = false} = {}) {
     },
   };
   // Learning-data persistence is covered by learning-data-regression.cjs, not this virtual filesystem.
-  const context = {require: id => id === './data-storage.cjs' ? { createDataStorage: () => async () => false, migrateRoot: async (_a, _b, commit) => commit() } : id === 'node:http' ? {createServer: fn => {handler=fn; return {}}} :
+  const context = {require: id => id === './chatgpt-auth.cjs' ? { createChatGPTAuth: () => async () => false } : id === './data-storage.cjs' ? { createDataStorage: () => async () => false, migrateRoot: async (_a, _b, commit) => commit() } : id === 'node:http' ? {createServer: fn => {handler=fn; return {}}} :
     id === 'node:fs/promises' ? io : id === 'node:fs' ? {
       constants: fs.constants, existsSync: p => p.endsWith('config.json') ? !!storageRoot : disk.has(p),
       readFileSync: () => JSON.stringify({courseStorageRoot: storageRoot}),

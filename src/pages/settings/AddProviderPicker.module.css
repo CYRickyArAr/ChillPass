@@ -1,0 +1,21 @@
+.picker { padding: 0; margin: auto; width: min(820px, calc(100vw - 40px)); max-width: none; max-height: min(72dvh, calc(100dvh - 40px)); color: var(--settings-text); background: var(--settings-bg); border: 1px solid var(--settings-border); border-radius: 10px; box-shadow: 0 16px 56px #0005; overflow: hidden; }
+.picker[open] { display: flex; flex-direction: column; }
+.picker::backdrop { background: #0006; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.search { display: flex; align-items: center; gap: 10px; padding: 10px 14px; flex-shrink: 0; border-bottom: 1px solid var(--settings-border); color: var(--settings-muted); }
+.search input { flex: 1; min-width: 0; padding: 6px 0; border: 0; background: transparent; color: var(--settings-text); outline: none; }
+.search input::placeholder { color: var(--settings-muted); }
+.body { overflow: auto; min-height: 0; padding: 16px; overscroll-behavior: contain; }
+.group + .group { margin-top: 20px; }
+.group h3 { margin: 0 0 9px; color: var(--settings-muted); font-size: 12px; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.card { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 66px; padding: 11px 12px; text-align: left; border: 1px solid var(--settings-border); border-radius: 7px; background: var(--settings-panel); color: var(--settings-text); }
+.card:hover { border-color: var(--settings-muted); background: var(--settings-selected); }
+.copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.copy strong { font-size: 13px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.copy small { font-size: 12px; color: var(--settings-muted); }
+.providerIcon, .customIcon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--settings-muted); font-size: 23px; font-weight: 600; }
+.customIcon { border: 1px dashed var(--settings-border); border-radius: 5px; }
+.empty { text-align: center; color: var(--settings-muted); font-size: 13px; padding: 24px 0; }
+@media (max-width: 700px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 440px) { .picker { width: calc(100vw - 24px); max-height: 78dvh; } .grid { grid-template-columns: 1fr; } }

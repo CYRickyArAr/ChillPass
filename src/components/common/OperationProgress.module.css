@@ -102,8 +102,11 @@
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: min(560px, calc(100vw - 48px));
-  max-height: min(620px, calc(100vh - 112px));
+  display: flex;
+  flex-direction: column;
+  width: min(400px, calc(100vw - 48px));
+  max-height: min(420px, calc(100vh - 112px));
+  max-height: min(420px, calc(100dvh - 112px));
   overflow: hidden;
   border: 1px solid var(--control-border);
   border-radius: 18px;
@@ -113,44 +116,68 @@
   -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
 
-.popoverHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--control-border);
-}
-
-.popoverHeader div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.popoverHeader strong {
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.popoverHeader span {
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.popoverHeader b {
-  color: var(--accent-text);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
-
-.list {
-  max-height: min(420px, calc(100vh - 270px));
+.popoverBody {
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
 }
+
+.list { min-width: 0; }
+
+.popoverFooter {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-top: 1px solid var(--control-border);
+}
+
+.clearButton {
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.clearButton:hover {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.trayButton:focus-visible,
+.clearButton:focus-visible,
+.errorPreview:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+/* 紧凑布局仅作用于任务托盘，页面内进度卡片保持原样。 */
+.card.compactCard { padding: 8px 12px; }
+.compactCard .heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compactCard .meta { gap: 4px 10px; margin-top: 4px; }
+.compactCard .meta:empty { display: none; }
+.compactCard .bar { margin-top: 6px; }
+
+.statusLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.statusText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.elapsed { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.errorPreview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; cursor: pointer; }
+.errorDetails[open] .errorPreview { display: block; }
+.errorPreview::before { content: '+ '; }
+.errorDetails[open] .errorPreview::before { content: '− '; }
 
 .card { padding: 12px 14px; min-width: 0; color: var(--text-primary); }
 .card + .card { border-top: 1px solid var(--control-border); }

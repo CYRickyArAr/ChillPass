@@ -45,7 +45,7 @@ interface MigrationFileEntry {
   courseName: string
 }
 
-export default function StorageSettings() {
+export default function StorageSettings({ embedded = false }: { embedded?: boolean }) {
   const t = useT()
   const navigate = useNavigate()
   const electronAPI = window.electronAPI
@@ -376,9 +376,9 @@ export default function StorageSettings() {
   })
 
   return (
-    <div className={styles.subPage}>
+    <div className={`${styles.subPage} ${embedded ? styles.embedded : ''}`}>
       {/* ===== 头部 ===== */}
-      <header className={styles.subHeader}>
+      {!embedded && <header className={styles.subHeader}>
         <button
           className={styles.backBtn}
           onClick={() => navigate('/settings')}
@@ -392,7 +392,7 @@ export default function StorageSettings() {
             {t('storage.cardDesc')}
           </p>
         </div>
-      </header>
+      </header>}
 
       {/* ===== Section 1: 资源存储位置 ===== */}
       <section className={`liquid-glass ${styles.card}`}>

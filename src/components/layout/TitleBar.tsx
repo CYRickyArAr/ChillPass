@@ -10,12 +10,16 @@ import {
   type AIProvider,
 } from '@stores/settingsStore'
 import { useAthenaPanelStore } from '@stores/athenaPanelStore'
+import { refreshChatGPTStatus, useChatGPTStore } from '@stores/chatgptStore'
 import {
   fetchProviderBalance,
+  hasBuiltinBalanceQuery,
   type ProviderBalance,
 } from '@services/providerBalance'
+import { connectCodexUsage, confirmCodexUsageConnection } from '@services/chatgptUsage'
 import { useT } from '../../i18n'
 import GlobalSearch from './GlobalSearch'
+import ProviderIcon from '@components/common/ProviderIcon'
 import styles from './TitleBar.module.css'
 
 /**
@@ -33,16 +37,27 @@ export default function TitleBar() {
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const [balance, setBalance] = useState<ProviderBalance | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
-  const [balanceError, setBalanceError] = useState(false)
+  const [balanceError, setBalanceError] = useState('')
   const providerMenuRef = useRef<HTMLDivElement>(null)
   const balanceRequestRunning = useRef(false)
   const balanceAbortController = useRef<AbortController | null>(null)
   const provider = useSettingsStore(s => s.provider)
+  const providerDisabled = useSettingsStore(s => s.providerDisabled)
+  const removedProviderIds = useSettingsStore(s => s.removedProviderIds)
   const providerConnections = useSettingsStore(s => s.providerConnections)
   const customProviderIds = useSettingsStore(s => s.customProviderIds)
   const setProvider = useSettingsStore(s => s.setProvider)
   const setModel = useSettingsStore(s => s.setModel)
   const t = useT()
+  const chatGPTReady = useChatGPTStore(s => s.planEnabled)
+  const chatGPTAccountId = useChatGPTStore(s => s.activeId)
+  const chatGPTUsageConnected = useChatGPTStore(s => s.usageConnected)
+  useEffect(() => {
+    const refresh = () => { void refreshChatGPTStatus().catch(() => {}) }
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [])
 
   // 浏览器模式下隐藏窗口控制按钮
   const isBrowser = window.electronAPI?.platform === 'browser'
@@ -68,31 +83,35 @@ export default function TitleBar() {
 
   const providerState = { ...useSettingsStore.getState(), providerConnections, customProviderIds }
   const activeConnection = getProviderConnection(provider, providerState)
-  const providerLabel = getProviderDisplayName(provider, providerState)
+  const providerLabel = providerDisabled ? '未选择服务商' : getProviderDisplayName(provider, providerState)
   const providerKey = activeConnection.apiKey
   const customUsageQuery = activeConnection.usageQuery ?? { enabled: false, script: '' }
-  const canQueryBalance = provider === 'deepseek' || provider === 'zhipu'
-    ? providerKey.trim().length > 0
-    : providerKey.trim().length > 0 && customUsageQuery.enabled && customUsageQuery.script.trim().length > 0
+  const builtinBalanceQuery = hasBuiltinBalanceQuery(provider)
+  const canQueryBalance = !providerDisabled && (provider === 'chatgpt' || (providerKey.trim().length > 0
+    && (builtinBalanceQuery || (customUsageQuery.enabled && customUsageQuery.script.trim().length > 0))))
 
   const allProviderMenuItems = [
     ...BUILTIN_PROVIDER_IDS,
     ...(customProviderIds ?? []),
   ].filter((id, index, list) => list.indexOf(id) === index) as AIProvider[]
   const providerMenuItems = allProviderMenuItems.filter(id => {
+    if ((removedProviderIds || []).includes(id)) return false
     const connection = getProviderConnection(id, providerState)
     const hasKey = connection.apiKey.trim().length > 0
     const hasBaseUrl = connection.baseUrl.trim().length > 0
-    const configured = id.startsWith('custom:') || id === 'custom'
+    const configured = id === 'chatgpt' ? chatGPTReady : id.startsWith('custom:') || id === 'custom'
       ? hasKey && hasBaseUrl
       : hasKey
     return configured || id === provider
   })
 
   const handleProviderChange = (next: AIProvider) => {
-    if (next !== provider) {
+    if (next !== provider || providerDisabled) {
       setProvider(next)
-      setModel(getProviderConnection(next).model || PROVIDER_DEFAULT_MODEL[next] || PROVIDER_DEFAULT_MODEL.custom)
+      const connection = getProviderConnection(next)
+      setModel(connection.enabledModels !== undefined
+        ? connection.model || connection.enabledModels[0] || ''
+        : next === 'chatgpt' ? connection.model || '' : connection.model || PROVIDER_DEFAULT_MODEL[next] || PROVIDER_DEFAULT_MODEL.custom)
     }
     setProviderMenuOpen(false)
   }
@@ -103,20 +122,26 @@ export default function TitleBar() {
       navigate('/settings/api')
       return
     }
+    if (provider === 'chatgpt' && chatGPTAccountId && !chatGPTUsageConnected) {
+      if (confirmCodexUsageConnection()) void refreshBalance(true)
+      return
+    }
     void refreshBalance()
   }
 
-  const refreshBalance = useCallback(async () => {
+  const refreshBalance = useCallback(async (connect = false) => {
     const key = providerKey.trim()
     if (!canQueryBalance || balanceRequestRunning.current) return
 
     balanceRequestRunning.current = true
     setBalanceLoading(true)
-    setBalanceError(false)
+    setBalanceError('')
     const controller = new AbortController()
     balanceAbortController.current = controller
     try {
-      const result = await fetchProviderBalance(
+      const result = connect && chatGPTAccountId
+        ? await connectCodexUsage(chatGPTAccountId, controller.signal)
+        : await fetchProviderBalance(
         provider,
         key,
         {
@@ -125,11 +150,14 @@ export default function TitleBar() {
         },
         controller.signal,
       )
-      if (!controller.signal.aborted) setBalance(result)
+      if (!controller.signal.aborted) {
+        if (connect) useChatGPTStore.setState({ usageConnected: true })
+        setBalance(result)
+      }
     } catch (error) {
       if (!controller.signal.aborted) {
-        setBalanceError(true)
-        console.warn(`${provider} balance query failed:`, error)
+        setBalance(null)
+        setBalanceError(error instanceof Error ? error.message : '余量查询失败，请重试。')
       }
     } finally {
       if (balanceAbortController.current === controller) {
@@ -137,7 +165,7 @@ export default function TitleBar() {
         setBalanceLoading(false)
       }
     }
-  }, [activeConnection.baseUrl, canQueryBalance, customUsageQuery, provider, providerKey])
+  }, [activeConnection.baseUrl, canQueryBalance, customUsageQuery, provider, providerKey, chatGPTAccountId])
 
   useEffect(() => {
     // 更换供应商或 Key 后回到未查询状态；余额仅由用户点击触发。
@@ -146,8 +174,9 @@ export default function TitleBar() {
     balanceRequestRunning.current = false
     setBalance(null)
     setBalanceLoading(false)
-    setBalanceError(false)
-  }, [provider, providerKey])
+    setBalanceError('')
+    return () => { balanceAbortController.current?.abort() }
+  }, [provider, providerKey, chatGPTAccountId, chatGPTReady, providerDisabled])
 
   useEffect(() => {
     if (!providerMenuOpen) return
@@ -167,16 +196,13 @@ export default function TitleBar() {
     }
   }, [providerMenuOpen])
 
-  const balanceText = balance?.text
-    ?? (provider !== 'deepseek' && provider !== 'zhipu' && !customUsageQuery.enabled
-      ? t('titlebar.balanceUnsupported')
-      : !canQueryBalance
-        ? t('titlebar.balanceNoKey')
-        : balanceError
-          ? t('titlebar.balanceUnavailable')
-          : balanceLoading
-            ? t('titlebar.balanceLoading')
-            : t('titlebar.balanceQuery'))
+  const balanceText = providerDisabled ? '配置服务商' : balanceLoading ? t('titlebar.balanceLoading')
+    : balanceError ? (provider === 'chatgpt' || provider === 'opencode-go' ? '余量查询失败' : t('titlebar.balanceUnavailable'))
+    : provider === 'chatgpt' && chatGPTAccountId && !chatGPTUsageConnected ? '连接 Codex 额度'
+    : balance?.text ?? (provider === 'chatgpt' ? '查询余量'
+      : !builtinBalanceQuery && !customUsageQuery.enabled
+        ? t('titlebar.balanceUnsupported')
+        : !canQueryBalance ? t('titlebar.balanceNoKey') : provider === 'opencode-go' ? '查询余量' : t('titlebar.balanceQuery'))
 
   const handleClose = () => {
     window.electronAPI?.windowClose()
@@ -253,7 +279,7 @@ export default function TitleBar() {
       )}
 
       <div className={styles.centerArea} ref={providerMenuRef}>
-        <div className={`${styles.providerBalancePill} ${balanceError ? styles.balanceBadgeError : ''}`}>
+        <div className={`${styles.providerBalancePill} ${provider === 'opencode-go' ? styles.goQuotaPill : ''} ${balanceError ? styles.balanceBadgeError : ''}`}>
           <button
             type="button"
             className={styles.providerHalf}
@@ -262,7 +288,7 @@ export default function TitleBar() {
             aria-haspopup="menu"
             aria-expanded={providerMenuOpen}
           >
-            <WalletCards size={13} strokeWidth={2} />
+            {providerDisabled ? <WalletCards size={13} strokeWidth={2} /> : <ProviderIcon provider={provider} name={providerLabel} size={17} />}
             <span>{providerLabel}</span>
             <ChevronDown
               size={12}
@@ -274,14 +300,13 @@ export default function TitleBar() {
             type="button"
             className={styles.balanceHalf}
             onClick={handleBalanceClick}
-            title={
-              balanceLoading
-                ? t('titlebar.balanceLoading')
-                : !canQueryBalance
-                  ? t('settings.api')
-                  : balance || balanceError
-                    ? t('titlebar.balanceRefresh')
-                    : t('titlebar.balanceQuery')
+            title={balanceError ? `${balanceError}\n点击重试`
+              : balanceLoading ? t('titlebar.balanceLoading')
+              : provider === 'chatgpt' && chatGPTAccountId && !chatGPTUsageConnected ? '连接本机官方 Codex 的同账号订阅额度（仅查询，不改变模型授权）'
+              : balance?.detail ? `${balance.detail}\n${t('titlebar.balanceRefresh')}`
+              : !canQueryBalance ? t('settings.api')
+              : provider === 'opencode-go' ? '查询 OpenCode Go 的 5 小时、每周和每月套餐余量（不发起模型请求）'
+              : balance ? t('titlebar.balanceRefresh') : t('titlebar.balanceQuery')
             }
             aria-label={`${providerLabel}: ${balanceText}`}
             disabled={balanceLoading}
@@ -301,7 +326,7 @@ export default function TitleBar() {
                 role="menuitemradio"
                 aria-checked={provider === id}
               >
-                <span>{getProviderDisplayName(id, providerState)}</span>
+                <ProviderIcon provider={id} name={getProviderDisplayName(id, providerState)} size={18} /><span>{getProviderDisplayName(id, providerState)}</span>
               </button>
             ))}
             <button

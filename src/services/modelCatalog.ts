@@ -6,8 +6,11 @@
 import { translate, type TranslationKey } from '../i18n'
 import { useLanguageStore } from '@stores/languageStore'
 import type { AIProvider } from '@stores/settingsStore'
+import { chatGPTJson } from './chatgpt'
+import { OPENCODE_GO_BASE_URL, OPENCODE_GO_MODELS, isSupportedGoModel } from './opencodeGo'
 
 const PROVIDER_MODEL_BASE_URL: Record<string, string> = {
+  'opencode-go': OPENCODE_GO_BASE_URL,
   deepseek: 'https://api.deepseek.com',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -23,6 +26,7 @@ const PROVIDER_MODEL_BASE_URL: Record<string, string> = {
 }
 
 const PROVIDER_DEFAULT_FALLBACK_MODEL: Record<string, string> = {
+  'opencode-go': 'glm-5.3-flash',
   deepseek: 'deepseek-flash',
   zhipu: 'glm-5.3-flash',
   qwen: 'qwen-plus',
@@ -40,6 +44,8 @@ const PROVIDER_DEFAULT_FALLBACK_MODEL: Record<string, string> = {
 
 /** 内置回退目录：服务商接口不可用或未填 Key 时展示 */
 export const BUILTIN_MODELS: Record<string, { id: string; descKey: TranslationKey }[]> = {
+  chatgpt: [],
+  'opencode-go': OPENCODE_GO_MODELS.map(id => ({ id, descKey: 'model.unknownDesc' })),
   deepseek: [
     { id: 'deepseek-flash', descKey: 'model.deepseekFlash' },
     { id: 'deepseek-v4-pro', descKey: 'model.deepseekV4Pro' },
@@ -165,7 +171,7 @@ function providerModelsUrl(provider: AIProvider, overrideCustomBaseUrl?: string)
 function parseModelIds(data: unknown): string[] {
   const ids: string[] = Array.isArray((data as { data?: unknown })?.data)
     ? ((data as { data: unknown[] }).data)
-        .map((m: { id?: unknown }) => (typeof m?.id === 'string' ? m.id : ''))
+        .map(m => (m && typeof m === 'object' && 'id' in m && typeof m.id === 'string' ? m.id : ''))
         .filter((id: string) => id.length > 0)
     : []
 
@@ -225,21 +231,26 @@ export async function fetchProviderModels(
   apiKey: string,
   options: number | FetchProviderModelsOptions = 15000,
 ): Promise<string[]> {
+  if (provider === 'chatgpt') {
+    const data = await chatGPTJson<{ models: { id: string }[] }>('/models')
+    return data.models.map(model => model.id)
+  }
   const key = apiKey.trim()
   if (!key) throw modelError('service.noApiKey')
   const timeoutMs = typeof options === 'number' ? options : options.timeoutMs ?? 15000
   const customBaseUrl = typeof options === 'number' ? undefined : options.customBaseUrl
   const url = providerModelsUrl(provider, customBaseUrl)
+  const compatibleIds = (data: unknown) => parseModelIds(data).filter(id => provider !== 'opencode-go' || isSupportedGoModel(id))
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     try {
-      return parseModelIds(await fetchModelsDirect(url, key, controller.signal))
+      return compatibleIds(await fetchModelsDirect(url, key, controller.signal))
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') throw err
-      return parseModelIds(await fetchModelsViaLocalProxy(url, key, controller.signal))
+      return compatibleIds(await fetchModelsViaLocalProxy(url, key, controller.signal))
     }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -252,5 +263,5 @@ export async function fetchProviderModels(
 }
 
 export function getProviderDefaultModel(provider: AIProvider): string {
-  return PROVIDER_DEFAULT_FALLBACK_MODEL[provider] ?? PROVIDER_DEFAULT_FALLBACK_MODEL.custom
+  return provider === 'chatgpt' ? '' : PROVIDER_DEFAULT_FALLBACK_MODEL[provider] ?? PROVIDER_DEFAULT_FALLBACK_MODEL.custom
 }

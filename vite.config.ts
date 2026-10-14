@@ -11,7 +11,10 @@ const { createDataStorage, migrateRoot } = createRequire(import.meta.url)('./ins
 const handleLearningData = createDataStorage(() => courseStorageRoot)
 
 const DEFAULT_COURSE_STORAGE_ROOT = path.join(os.homedir(), 'Documents', 'ChillPass')
-const CONFIG_DIR = path.join(os.homedir(), '.chillpass')
+const CONFIG_DIR = process.env.CHILLPASS_CONFIG_DIR || path.join(os.homedir(), '.chillpass')
+const { createChatGPTAuth } = createRequire(import.meta.url)('./installer/chatgpt-auth.cjs')
+const { createOpenCodeGoProxy } = createRequire(import.meta.url)('./installer/opencode-go.cjs')
+const handleOpenCodeGo = createOpenCodeGoProxy()
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
 let courseStorageRoot = DEFAULT_COURSE_STORAGE_ROOT
 let previousStorageRoots: string[] = []
@@ -238,11 +241,15 @@ export default defineConfig({
     {
       name: 'chillpass-course-storage-api',
       configureServer(server) {
+        const handleChatGPT = createChatGPTAuth({ configDir: CONFIG_DIR })
+        server.httpServer?.once('close', () => handleChatGPT.close())
         server.middlewares.use(async (req: any, res: any, next: any) => {
           try {
             const requestUrl = new URL(req.url || '/', 'http://localhost')
             const urlPath = requestUrl.pathname
             if (!urlPath.startsWith('/api/')) return next()
+            if (await handleChatGPT(req, res, urlPath)) return
+            if (await handleOpenCodeGo(req, res, urlPath)) return
             if (await handleLearningData(req, res, urlPath)) return
             if (urlPath === '/api/getAppVersion') return sendJson(res, { version: APP_VERSION, buildId: 'development-local-learning-data' })
             if (urlPath === '/api/checkForUpdates' && req.method === 'GET') {

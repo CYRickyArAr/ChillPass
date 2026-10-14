@@ -5,12 +5,14 @@ import { translate, type TranslationKey } from '../i18n'
 import { useLanguageStore } from '@stores/languageStore'
 import { beginOperation, trackOperation, type ProgressReporter } from '@stores/operationProgressStore'
 import { customChatCompletionsUrl } from './modelCatalog'
+import { preferredEnabledModel } from './modelPreferences'
 import { checkpointKey, readCheckpoint, saveCheckpoint } from './extractionCheckpoint'
 import { prepareTextSources, splitCourseText } from './courseTextSources'
 import { orderExamPointsByDependency } from './lessonOrdering'
 import { lessonQualityIssues, practiceGuidance, questionDesignIssues } from './lessonPedagogy'
 import { aiRequests, BACKGROUND_CONCURRENCY, mapConcurrent, abortableDelay, abortError, type AiPriority } from './aiScheduling'
-import { readAiEvents } from './aiResponse'
+import { aiRequestBody, readProviderEvents } from './chatgpt'
+import { opencodeGoProtocol } from './opencodeGo'
 import { ECONOMY_LESSON_PROMPT, economyLessonLimits, economyLessonTask } from './lessonEconomy'
 import { lessonOutputPolicy, nextLessonOutputLimit, type LessonOutputRecovery } from './lessonOutputBudget'
 
@@ -25,6 +27,8 @@ interface ChatMessage {
 }
 
 interface DeepSeekCallOptions {
+  /** Stable routing ID, reused across retries of this task. */
+  sessionId?: string
   /** Per-task overrides; never persistently change the user's other AI tasks. */
   model?: string
   fastResponse?: boolean
@@ -106,15 +110,17 @@ function serviceErrorFmt(key: TranslationKey, map: Record<string, string>): Erro
 
 /** 根据当前提供商解析请求地址与密钥 */
 function resolveProviderConfig(modelOverride?: string) {
-  const { provider, model } = useSettingsStore.getState()
+  const { provider, model, providerDisabled } = useSettingsStore.getState()
+  if (providerDisabled) throw new Error('当前服务商已移除，请在设置中选择并启用服务商。')
   const connection = getProviderConnection(provider)
   const isDeepSeek = provider === 'deepseek'
-  const selectedModel = modelOverride?.trim() || model
+  const selectedModel = preferredEnabledModel(connection, modelOverride?.trim() || model)
   return {
     provider,
     isDeepSeek,
     isZhipu: provider === 'zhipu',
-    url: customChatCompletionsUrl(connection.baseUrl),
+    url: provider === 'chatgpt' ? '/api/chatgpt/responses' : provider === 'opencode-go'
+      ? `/api/opencode-go/${opencodeGoProtocol(selectedModel)}` : customChatCompletionsUrl(connection.baseUrl),
     apiKey: connection.apiKey.trim(),
     model: selectedModel,
   }
@@ -194,11 +200,12 @@ async function callDeepSeek(
   messages: ChatMessage[],
   options?: DeepSeekCallOptions
 ): Promise<string> {
-  const { provider, url, apiKey, model, isZhipu } = resolveProviderConfig()
-  if (!apiKey) throw serviceError('service.noApiKey')
+  const { provider, url, apiKey, model, isZhipu } = resolveProviderConfig(options?.model)
+  if (provider !== 'chatgpt' && !apiKey) throw serviceError('service.noApiKey')
   if (!url) throw serviceError('api.customBaseUrlRequired')
   const safeMessages = sanitizeMessagesForModel(messages)
   const maxRetries = options?.retries ?? 2
+  const sessionId = provider === 'opencode-go' ? options?.sessionId || crypto.randomUUID() : undefined
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     if (options?.attemptBudget && options.attemptBudget.remaining <= 0) throw serviceError('progress.lessonAttemptsExhausted')
@@ -224,15 +231,14 @@ async function callDeepSeek(
       options?.onProgress?.({ stage: attempt > 1 ? 'retrying' : 'waiting' })
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: !isZhipu && options?.model ? options.model : model, messages: safeMessages, temperature: options?.temperature ?? 0.7,
+        ...aiRequestBody(provider, apiKey, {
+          model, messages: safeMessages, temperature: options?.temperature ?? 0.7,
           max_tokens: options?.maxTokens ?? 4096,
           ...responseMode(provider, options?.fastResponse),
           stream: true,
           ...(isZhipu ? {} : { stream_options: { include_usage: true } }),
           ...(options?.jsonMode ? { response_format: { type: 'json_object' } } : {}),
-        }),
+        }, sessionId),
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -243,16 +249,22 @@ async function callDeepSeek(
           const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now()
           if (Number.isFinite(delay)) retryDelay = Math.max(retryDelay, delay)
         }
-        throw serviceErrorFmt('service.apiError', { code: String(response.status), msg: await response.text() })
+        const errorBody = await response.text()
+        if (provider === 'chatgpt' && errorBody.includes('subscription_sharing_usage_limit_exceeded')) retryable = false
+        throw serviceErrorFmt('service.apiError', { code: String(response.status), msg: errorBody })
       }
 
       let content = ''
       let finishReason: string | undefined
       let lastProgressAt = 0
       if (options?.idleTimeout) touchTimeout()
-      for await (const event of readAiEvents(response, controller.signal)) {
-        if (options?.idleTimeout) touchTimeout()
+      for await (const event of readProviderEvents(response, provider, controller.signal, model)) {
+        if (options?.idleTimeout || provider === 'chatgpt') touchTimeout()
         recordTokenUsage(event?.usage)
+        if (event.incomplete) {
+          if (options?.jsonMode && event.incompleteReason === 'max_output_tokens') throw new StructuredOutputError(serviceText('service.structuredOutputTruncated'), 'truncated')
+          throw new Error('ChatGPT 输出未完成，请提高输出上限或缩短输入。')
+        }
         const choice = event?.choices?.[0]
         if (choice?.finish_reason) finishReason = choice.finish_reason
         const text = choice?.delta ? extractTextValue(choice.delta.content) : extractCompletionText(event)
@@ -309,15 +321,17 @@ export async function* callDeepSeekStream(
   options?: {
     temperature?: number
     kind?: 'chat' | 'task'
+    sessionId?: string
     signal?: AbortSignal
     model?: string
     thinkingMode?: AthenaThinkingMode
   }
 ): AsyncGenerator<string> {
   const { provider, url, apiKey, model, isZhipu } = resolveProviderConfig(options?.model)
-  if (!apiKey) throw serviceError('service.noApiKey')
+  if (provider !== 'chatgpt' && !apiKey) throw serviceError('service.noApiKey')
   if (!url) throw serviceError('api.customBaseUrlRequired')
   const safeMessages = sanitizeMessagesForModel(messages)
+  const sessionId = provider === 'opencode-go' ? options?.sessionId || crypto.randomUUID() : undefined
   const operation = beginOperation(options?.kind ?? 'chat')
   let release: (() => void) | undefined
   const controller = new AbortController()
@@ -337,18 +351,18 @@ export async function* callDeepSeekStream(
     touchTimeout()
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({
+      ...aiRequestBody(provider, apiKey, {
         model, messages: safeMessages, temperature: options?.temperature ?? 0.7,
         ...responseMode(provider, options?.thinkingMode), stream: true,
         ...(isZhipu ? {} : { stream_options: { include_usage: true } }),
-      }),
+      }, sessionId),
       signal: controller.signal,
     })
     if (!response.ok) throw serviceErrorFmt('service.apiError', { code: String(response.status), msg: await response.text() })
-    for await (const event of readAiEvents(response, controller.signal)) {
+    for await (const event of readProviderEvents(response, provider, controller.signal, model)) {
       touchTimeout()
       recordTokenUsage(event?.usage)
+      if (event.incomplete) throw new Error('模型输出未完成，请缩短问题后重试。')
       const choice = event?.choices?.[0]
       const content = choice?.delta ? extractTextValue(choice.delta.content) : extractCompletionText(event)
       if (content) {
@@ -1923,7 +1937,7 @@ export async function* chatWithAthena(
   charterMemories?: string[],
   flowMemories?: string[],
   images?: string[],
-  options?: { model?: string; thinkingMode?: AthenaThinkingMode; signal?: AbortSignal },
+  options?: { model?: string; thinkingMode?: AthenaThinkingMode; signal?: AbortSignal; sessionId?: string },
 ): AsyncGenerator<string> {
   const charterText = charterMemories && charterMemories.length > 0
     ? `\n\n【宪章记忆 - 必须遵守】\n${charterMemories.join('\n')}`
@@ -1958,6 +1972,7 @@ ${courseContext}
 
   yield* callDeepSeekStream(messages, {
     temperature: 0.7,
+    sessionId: options?.sessionId,
     model: options?.model,
     thinkingMode: options?.thinkingMode,
     signal: options?.signal,
@@ -2017,7 +2032,7 @@ export async function* executeTask(
   history: ChatMessage[],
   charterMemories?: string[],
   images?: string[],
-  options?: { model?: string; thinkingMode?: AthenaThinkingMode; signal?: AbortSignal },
+  options?: { model?: string; thinkingMode?: AthenaThinkingMode; signal?: AbortSignal; sessionId?: string },
 ): AsyncGenerator<string> {
   const taskConfig = {
     paper: {
@@ -2063,6 +2078,7 @@ ${courseContext}
   yield* callDeepSeekStream(messages, {
     temperature: 0.7,
     kind: 'task',
+    sessionId: options?.sessionId,
     model: options?.model,
     thinkingMode: options?.thinkingMode,
     signal: options?.signal,

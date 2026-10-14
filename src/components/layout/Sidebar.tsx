@@ -114,6 +114,11 @@ export default function Sidebar() {
     const isModifiedClick = event.metaKey || event.altKey || event.ctrlKey || event.shiftKey
     const opensElsewhere = event.currentTarget.target && event.currentTarget.target !== '_self'
     if (event.defaultPrevented || event.button !== 0 || isModifiedClick || opensElsewhere) return
+    if (targetPath === '/settings') {
+      // Settings overlays the current workspace; do not animate/unmount the study page.
+      delete document.documentElement.dataset.pageTransitionDirection
+      return
+    }
     if (targetPath === '/upload') {
       event.preventDefault()
       navigate('/upload', { state: { importMode: 'append' } })

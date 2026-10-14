@@ -13,7 +13,7 @@ import type { UpdateInfo, UpdateStatus } from '../../types'
 import packageJson from '../../../package.json'
 import styles from './SettingsSub.module.css'
 
-export default function AboutSettings() {
+export default function AboutSettings({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate()
   const t = useT()
 
@@ -42,8 +42,8 @@ export default function AboutSettings() {
   }
 
   return (
-    <div className={styles.subPage}>
-      <header className={styles.subHeader}>
+    <div className={`${styles.subPage} ${embedded ? styles.embedded : ''}`}>
+      {!embedded && <header className={styles.subHeader}>
         <button
           type="button"
           className={styles.backBtn}
@@ -56,7 +56,7 @@ export default function AboutSettings() {
           <h1 className={styles.title}>{t('settings.about')}</h1>
           <p className={styles.subtitle}>{t('about.subtitle')}</p>
         </div>
-      </header>
+      </header>}
 
       {/* 应用信息 */}
       <section className={`liquid-glass ${styles.card}`}>

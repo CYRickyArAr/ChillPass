@@ -1,4 +1,6 @@
 import type { AIProvider, CustomUsageQuerySettings } from '@stores/settingsStore'
+import { fetchChatGPTBalance } from './chatgptUsage'
+import { fetchOpenCodeGoBalance } from './opencodeGoUsage'
 import {
   fetchDeepSeekBalance,
   type DeepSeekBalance,
@@ -238,6 +240,10 @@ export async function fetchZhipuBalance(
   return parseZhipuQuota(await response.json())
 }
 
+export function hasBuiltinBalanceQuery(provider: AIProvider): boolean {
+  return provider === 'chatgpt' || provider === 'deepseek' || provider === 'zhipu' || provider === 'opencode-go'
+}
+
 export async function fetchProviderBalance(
   provider: AIProvider,
   apiKey: string,
@@ -247,6 +253,8 @@ export async function fetchProviderBalance(
   } = {},
   signal?: AbortSignal,
 ): Promise<ProviderBalance> {
+  if (provider === 'chatgpt') return fetchChatGPTBalance(signal)
+  if (provider === 'opencode-go') return fetchOpenCodeGoBalance(apiKey, signal)
   if (provider === 'deepseek') {
     return formatCurrencyBalance(await fetchDeepSeekBalance(apiKey, signal))
   }

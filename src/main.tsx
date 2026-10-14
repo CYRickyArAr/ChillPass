@@ -7,7 +7,8 @@ import 'katex/contrib/copy-tex'
 import './styles/global.css'
 import { setupElectronMock } from './utils/electronMock'
 import { setupCodeCopy } from './utils/codeCopy'
-import { initializeLearningData } from './services/learningDataStorage'
+import { initializeLearningData, LearningDataConflictError } from './services/learningDataStorage'
+import LearningDataRecovery from './components/common/LearningDataRecovery'
 
 // 非 Electron 环境下注入 Mock API
 setupElectronMock()
@@ -28,6 +29,10 @@ async function start() {
   </React.StrictMode>
     )
   } catch (error) {
+    if (error instanceof LearningDataConflictError) {
+      ReactDOM.createRoot(container).render(<LearningDataRecovery conflict={error} />)
+      return
+    }
     container.style.cssText = 'padding:40px;white-space:pre-wrap;font:16px/1.7 sans-serif'
     container.textContent = `学习数据暂未加载，未使用空数据覆盖原记录。\n${error instanceof Error ? error.message : error}\n请确认本地服务已更新并运行，然后重试。\n`
     const retry = document.createElement('button')

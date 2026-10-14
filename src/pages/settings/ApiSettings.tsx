@@ -1,597 +1,319 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, Eye, EyeOff, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
+import ProviderIcon from '@components/common/ProviderIcon'
 import {
-  ArrowLeft,
-  Eye,
-  EyeOff,
-  Save,
-  Check,
-  Trash2,
-  RefreshCw,
-  ChevronDown,
-  AlertTriangle,
-  Plus,
-} from 'lucide-react'
-import {
-  BUILTIN_PROVIDER_IDS,
-  DEFAULT_CUSTOM_USAGE_SCRIPT,
-  getProviderConnection,
-  getProviderDisplayName,
-  isCustomProviderId,
-  PROVIDER_DEFAULT_MODEL,
-  useSettingsStore,
+  BUILTIN_PROVIDER_IDS, DEFAULT_CUSTOM_USAGE_SCRIPT, getProviderConnection, getProviderDisplayName,
+  isCustomProviderId, getVisibleProviderIds, PROVIDER_DEFAULT_MODEL, useSettingsStore,
 } from '@stores/settingsStore'
-import type { AIProvider } from '@stores/settingsStore'
-import {
-  BUILTIN_MODELS,
-  describeModel,
-  fetchProviderModels,
-  hasModelDescription,
-} from '@services/modelCatalog'
+import type { AIProvider, ProviderConnectionSettings } from '@stores/settingsStore'
+import { BUILTIN_MODELS, fetchProviderModels, normalizeCustomBaseUrl } from '@services/modelCatalog'
+import { enabledModelIds } from '@services/modelPreferences'
+import { isSupportedGoModel } from '@services/opencodeGo'
+import { fetchProviderBalance, hasBuiltinBalanceQuery, type ProviderBalance } from '@services/providerBalance'
 import { useTokenStore, dateKey } from '@stores/tokenStore'
-import { useT } from '../../i18n'
-import styles from './SettingsSub.module.css'
-import LessonCostEstimate from '../../components/common/LessonCostEstimate'
+import { loadChatGPTModels, useChatGPTStore } from '@stores/chatgptStore'
+import ChatGPTSettings from './ChatGPTSettings'
+import AddProviderPicker from './AddProviderPicker'
+import ui from './SettingsDialog.module.css'
+import styles from './ModelsSettings.module.css'
 
-export default function ApiSettings() {
-  const navigate = useNavigate()
-  const t = useT()
+type Draft = ProviderConnectionSettings & { model: string; availableModels: string[] }
+function initialDraft(id: AIProvider): Draft {
+  const state = useSettingsStore.getState()
+  const connection = getProviderConnection(id)
+  const models = id === 'chatgpt' ? useChatGPTStore.getState().models.map(item => item.id)
+    : connection.availableModels ?? (BUILTIN_MODELS[id] ?? BUILTIN_MODELS.custom).map(item => item.id)
+  const preferred = connection.model || (state.provider === id ? state.model : PROVIDER_DEFAULT_MODEL[id] || '')
+  const catalog = id !== 'chatgpt' && preferred && !models.includes(preferred) ? [...models, preferred] : models
+  const enabled = enabledModelIds(catalog, connection.enabledModels)
+  return { ...connection, availableModels: catalog, model: enabled.includes(preferred) ? preferred : enabled[0] || '' }
+}
 
-  const tokenTotal = useTokenStore(s => s.total)
-  const callCount = useTokenStore(s => s.callCount)
-  const dailyUsage = useTokenStore(s => s.daily)
-  const resetStats = useTokenStore(s => s.resetStats)
-
-  const activeProvider = useSettingsStore(s => s.provider)
-  // The selected settings tab is only an editor, not the provider used for requests.
-  const [provider, setEditingProvider] = useState<AIProvider>(activeProvider)
-  const providerConnections = useSettingsStore(s => s.providerConnections)
-  const customProviderIds = useSettingsStore(s => s.customProviderIds)
-  const storeModel = useSettingsStore(s => s.model)
-  const fastResponses = useSettingsStore(s => s.fastResponses)
-  const setFastResponses = useSettingsStore(s => s.setFastResponses)
-  const economyLessons = useSettingsStore(s => s.economyLessons)
-  const setEconomyLessons = useSettingsStore(s => s.setEconomyLessons)
-  const setProviderConnection = useSettingsStore(s => s.setProviderConnection)
-  const addCustomProvider = useSettingsStore(s => s.addCustomProvider)
-  const removeCustomProvider = useSettingsStore(s => s.removeCustomProvider)
-  const setModel = useSettingsStore(s => s.setModel)
-
-  const providerState = { ...useSettingsStore.getState(), providerConnections, customProviderIds }
-  const activeConnection = getProviderConnection(provider, providerState)
-  const isCustom = isCustomProviderId(provider)
-  const storedKey = activeConnection.apiKey
-
-  const [apiKey, setApiKeyInput] = useState(storedKey)
-  const [providerName, setProviderNameInput] = useState(activeConnection.name)
-  const [baseUrl, setBaseUrlInput] = useState(activeConnection.baseUrl)
-  const [customUsageEnabled, setCustomUsageEnabled] = useState(activeConnection.usageQuery?.enabled === true)
-  const [customUsageScript, setCustomUsageScript] = useState(activeConnection.usageQuery?.script || DEFAULT_CUSTOM_USAGE_SCRIPT)
-  const [customUsageOpen, setCustomUsageOpen] = useState(activeConnection.usageQuery?.enabled === true)
-  const [model, setModelInput] = useState(activeConnection.model || storeModel)
+export default function ApiSettings({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
+  const settings = useSettingsStore()
+  const auth = useChatGPTStore()
+  const tokens = useTokenStore()
+  const [provider, setProvider] = useState<AIProvider>(() => {
+    const ids = getVisibleProviderIds(settings)
+    return ids.includes(settings.provider) ? settings.provider : ids[0] || settings.provider
+  })
+  const [nextActive, setNextActive] = useState<AIProvider | null>(settings.providerDisabled ? null : settings.provider)
+  const [drafts, setDrafts] = useState<Record<string, Draft>>(() => ({ [provider]: initialDraft(provider) }))
+  const [dirtyIds, setDirtyIds] = useState<string[]>([])
+  const [adding, setAdding] = useState(false)
+  const [query, setQuery] = useState('')
+  const [manualModel, setManualModel] = useState('')
   const [showKey, setShowKey] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [fetching, setFetching] = useState<AIProvider | null>(null)
+  const [balanceBusy, setBalanceBusy] = useState(false)
+  const [balances, setBalances] = useState<Record<string, ProviderBalance>>({})
+  const balanceAbortController = useRef<AbortController | null>(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const mounted = useRef(true)
+  const requestVersion = useRef(0)
+  const accountId = useRef(auth.activeId)
+  const dirty = dirtyIds.length > 0 || nextActive !== (settings.providerDisabled ? null : settings.provider)
+  const draft = drafts[provider] || initialDraft(provider)
+  const catalog = provider === 'chatgpt' ? auth.models.map(item => item.id) : draft.availableModels
+  const enabled = enabledModelIds(catalog, draft.enabledModels)
+  const custom = isCustomProviderId(provider)
+  const names = useMemo(() => new Map(auth.models.map(item => [item.id, item.name])), [auth.models])
+  const shownModels = catalog.filter(id => `${id} ${provider === 'chatgpt' ? names.get(id) || '' : ''}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const providerIds = getVisibleProviderIds(settings)
+  const hasSelection = providerIds.includes(provider)
 
-  // ── 模型列表：实时拉取 + 悬停说明 ──
-  const [liveModels, setLiveModels] = useState<string[] | null>(activeConnection.availableModels ?? null)
-  const fetchRequestIdRef = useRef(0)
-  const [fetching, setFetching] = useState(false)
-  const [fetchError, setFetchError] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [hoveredModel, setHoveredModel] = useState<string | null>(null)
-  const modelBoxRef = useRef<HTMLDivElement>(null)
-
-  // 当 store 中的值被外部修改或切换供应商时，同步本地输入
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; requestVersion.current++; balanceAbortController.current?.abort() } }, [])
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  // A newly authorized/switched account must not inherit another account's model switches.
   useEffect(() => {
-    const next = getProviderConnection(provider, { ...useSettingsStore.getState(), providerConnections, customProviderIds })
-    setApiKeyInput(next.apiKey)
-    setProviderNameInput(next.name)
-    setBaseUrlInput(next.baseUrl)
-    setCustomUsageEnabled(next.usageQuery?.enabled === true)
-    setCustomUsageScript(next.usageQuery?.script || DEFAULT_CUSTOM_USAGE_SCRIPT)
-    setCustomUsageOpen(next.usageQuery?.enabled === true)
-  }, [provider, providerConnections, customProviderIds])
+    const changedAccount = accountId.current !== auth.activeId
+    accountId.current = auth.activeId
+    setDrafts(previous => {
+      if (!previous.chatgpt || changedAccount) return { ...previous, chatgpt: initialDraft('chatgpt') }
+      const ids = auth.models.map(item => item.id)
+      const current = previous.chatgpt
+      const allowed = enabledModelIds(ids, current.enabledModels)
+      return { ...previous, chatgpt: { ...current, availableModels: ids, model: allowed.includes(current.model) ? current.model : allowed[0] || '' } }
+    })
+    if (changedAccount) { setDirtyIds(ids => ids.filter(id => id !== 'chatgpt')); setNotice('') }
+  }, [auth.activeId, auth.models])
 
-  // 切换配置页厂商时读取其上次保存的列表，不自动请求远端。
-  useEffect(() => {
-    setLiveModels(getProviderConnection(provider).availableModels ?? null)
-    setFetchError('')
-  }, [provider])
-
-  /** 拉取服务商当前可用的模型列表 */
-  const handleFetchModels = async () => {
-    const key = apiKey.trim() || storedKey.trim()
-    if (!key) {
-      setFetchError(t('api.modelNeedKey'))
-      return
+  function cancelBalanceQuery() {
+    balanceAbortController.current?.abort()
+    balanceAbortController.current = null
+    setBalanceBusy(false)
+  }
+  function patch(id: AIProvider, value: Partial<Draft>) {
+    if (value.apiKey !== undefined || value.baseUrl !== undefined || value.usageQuery !== undefined) {
+      cancelBalanceQuery()
+      setBalances(previous => { const copy = { ...previous }; delete copy[id]; return copy })
     }
-    const baseUrlForFetch = baseUrl.trim() || activeConnection.baseUrl.trim()
-    if (!baseUrlForFetch) {
-      setFetchError(t('api.customBaseUrlRequired'))
-      return
-    }
-    const requestId = ++fetchRequestIdRef.current
-    setFetching(true)
-    setFetchError('')
+    setDrafts(previous => ({ ...previous, [id]: { ...(previous[id] || initialDraft(id)), ...value } }))
+    setDirtyIds(previous => previous.includes(id) ? previous : [...previous, id])
+    setNotice(''); setError('')
+  }
+  function chooseProvider(id: AIProvider) {
+    cancelBalanceQuery()
+    setDrafts(previous => previous[id] ? previous : { ...previous, [id]: initialDraft(id) })
+    setProvider(id); setQuery(''); setManualModel(''); setShowKey(false); setNotice(''); setError(''); setAdding(false)
+  }
+  function toggleModel(id: string, checked: boolean) {
+    const next = checked ? [...enabled, id] : enabled.filter(item => item !== id)
+    patch(provider, { enabledModels: next, model: next.includes(draft.model) ? draft.model : next[0] || '' })
+  }
+  async function refreshModels() {
+    const id = provider, request = ++requestVersion.current
+    setFetching(id); setError(''); setNotice('')
     try {
-      const ids = await fetchProviderModels(provider, key, {
-        customBaseUrl: baseUrlForFetch,
+      if (id === 'chatgpt') {
+        await loadChatGPTModels()
+        if (useChatGPTStore.getState().modelError) throw new Error(useChatGPTStore.getState().modelError)
+      } else {
+        if (!draft.apiKey.trim()) throw new Error('请先填写 API Key，再刷新模型目录。')
+        const ids = await fetchProviderModels(id, draft.apiKey, { customBaseUrl: draft.baseUrl })
+        if (!mounted.current || request !== requestVersion.current) return
+        setDrafts(previous => {
+          const current = previous[id] || initialDraft(id)
+          const allowed = enabledModelIds(ids, current.enabledModels)
+          return { ...previous, [id]: { ...current, availableModels: ids, model: allowed.includes(current.model) ? current.model : allowed[0] || '' } }
+        })
+        setDirtyIds(previous => previous.includes(id) ? previous : [...previous, id])
+      }
+    } catch (error) {
+      if (mounted.current && request === requestVersion.current) setError(error instanceof Error ? error.message : '模型目录加载失败。')
+    } finally { if (mounted.current && request === requestVersion.current) setFetching(null) }
+  }
+  function addModel() {
+    const id = manualModel.trim()
+    if (!id) return
+    if (provider === 'opencode-go' && !isSupportedGoModel(id)) { setError('此 Go 模型的接口格式尚未适配，请从模型目录选择。'); return }
+    const next = Array.from(new Set([...catalog, id]))
+    patch(provider, { availableModels: next, enabledModels: Array.from(new Set([...enabled, id])), model: draft.model || id })
+    setManualModel(''); setQuery('')
+  }
+  function removeProvider(id: AIProvider) {
+    const name = drafts[id]?.name || getProviderDisplayName(id)
+    const detail = id === 'chatgpt' ? '移除列表和模型配置，保留本机 ChatGPT 登录。' : '清除该服务商的 API Key 和连接配置。'
+    if (!window.confirm(`删除 ${name}？${detail}\n不会删除课程与对话。若正在使用此服务商，将暂停新的 AI 请求，不会自动切换计费通道。`)) return
+    requestVersion.current++; setFetching(null)
+    cancelBalanceQuery()
+    settings.removeProvider(id)
+    setDrafts(previous => { const copy = { ...previous }; delete copy[id]; return copy })
+    setDirtyIds(ids => ids.filter(value => value !== id))
+    setBalances(previous => { const copy = { ...previous }; delete copy[id]; return copy })
+    if (nextActive === id) setNextActive(null)
+    const remaining = getVisibleProviderIds(useSettingsStore.getState())
+    if (provider === id && remaining.length) chooseProvider(remaining[0])
+    setError(''); setNotice(`已删除 ${name}，可通过“添加服务商”重新添加。`)
+  }
+  function save() {
+    const selected = drafts[nextActive || provider] || initialDraft(nextActive || provider)
+    const activating = nextActive !== null && (nextActive !== settings.provider || settings.providerDisabled)
+    if (activating && nextActive) {
+      if (nextActive === 'chatgpt' ? !auth.planEnabled : !selected.apiKey.trim() || !selected.baseUrl.trim()) {
+        setError('请先完成所选服务商的连接配置，再将其设为当前服务商。'); return
+      }
+      if (!enabledModelIds(selected.availableModels, selected.enabledModels).length) { setError('请至少启用一个模型。'); return }
+    }
+    for (const id of dirtyIds as AIProvider[]) {
+      const value = drafts[id]
+      if (!value) continue
+      if (id !== 'chatgpt' && value.baseUrl.trim()) {
+        try { if (!['http:', 'https:'].includes(new URL(value.baseUrl.trim()).protocol)) throw new Error() }
+        catch { setError(`${value.name} 的 API 地址无效，请填写完整的 HTTP(S) 地址。`); return }
+      }
+    }
+    for (const id of dirtyIds as AIProvider[]) {
+      const value = drafts[id]
+      if (!value) continue
+      const ids = id === 'chatgpt' ? auth.models.map(item => item.id) : value.availableModels
+      const allowed = enabledModelIds(ids, value.enabledModels)
+      settings.setProviderConnection(id, {
+        ...value, name: value.name.trim() || '自定义供应商', apiKey: id === 'chatgpt' ? '' : value.apiKey.trim(),
+        baseUrl: id === 'chatgpt' ? '' : normalizeCustomBaseUrl(value.baseUrl),
+        model: allowed.includes(value.model) ? value.model : allowed[0] || '',
+        availableModels: ids,
       })
-      if (requestId !== fetchRequestIdRef.current) return
-      setLiveModels(ids)
-      if (ids.length > 0 && !ids.includes(model)) {
-        setModelInput(ids[0])
-      }
-    } catch (err) {
-      if (requestId !== fetchRequestIdRef.current) return
-      setFetchError(
-        t('api.modelRefreshFailed').replace(
-          '{msg}',
-          err instanceof Error ? err.message : t('common.unknownError'),
-        ),
-      )
+    }
+    // Merely editing a provider never changes billing. Activation requires an explicit user action + Save.
+    if (activating && nextActive) settings.setProvider(nextActive)
+    if (nextActive && (dirtyIds.includes(nextActive) || activating)) {
+      settings.setModel(getProviderConnection(nextActive).model || selected.model || '')
+    }
+    setDirtyIds([]); setError(''); setNotice('已保存')
+  }
+  async function queryBalance() {
+    if (balanceAbortController.current) return
+    const id = provider
+    const controller = new AbortController()
+    balanceAbortController.current = controller
+    setBalanceBusy(true); setError('')
+    setBalances(previous => { const copy = { ...previous }; delete copy[id]; return copy })
+    try {
+      const result = await fetchProviderBalance(id, draft.apiKey, { customBaseUrl: draft.baseUrl, customUsageQuery: draft.usageQuery }, controller.signal)
+      if (mounted.current && !controller.signal.aborted && getVisibleProviderIds().includes(id)) setBalances(previous => ({ ...previous, [id]: result }))
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) setError(error instanceof Error ? error.message : '额度查询失败。')
     } finally {
-      if (requestId === fetchRequestIdRef.current) setFetching(false)
-    }
-  }
-
-  // 点击外部或按 Esc 关闭下拉
-  useEffect(() => {
-    if (!menuOpen) return
-    const onPointerDown = (e: PointerEvent) => {
-      if (modelBoxRef.current && !modelBoxRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
+      if (balanceAbortController.current === controller) {
+        balanceAbortController.current = null
+        if (mounted.current) setBalanceBusy(false)
       }
     }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [menuOpen])
-
-  // 下拉选项：实时列表优先，否则用内置列表；始终保留当前已选模型
-  const modelOptions = useMemo(() => {
-    const base =
-      liveModels && liveModels.length > 0
-        ? liveModels
-        : (BUILTIN_MODELS[provider] ?? BUILTIN_MODELS.custom).map(m => m.id)
-    const list = [...base]
-    if (model && !list.includes(model)) list.unshift(model)
-    return list
-  }, [liveModels, provider, model])
-
-  // 悬停说明：优先显示光标停留的选项，否则显示当前所选模型
-  const tipModel = hoveredModel ?? model
-
-  // Only change which provider's configuration is being edited.
-  const handleProviderChange = (next: AIProvider) => {
-    if (next === provider) return
-    fetchRequestIdRef.current += 1
-    setFetching(false)
-    setEditingProvider(next)
-    const connection = getProviderConnection(next)
-    setModelInput(connection.model || (next === activeProvider ? storeModel : PROVIDER_DEFAULT_MODEL[next] ?? PROVIDER_DEFAULT_MODEL.custom))
-    setMenuOpen(false)
-    setSaved(false)
   }
+  const canQueryBalance = provider !== 'chatgpt' && Boolean(draft.apiKey.trim()) && (hasBuiltinBalanceQuery(provider) || (draft.usageQuery?.enabled && Boolean(draft.usageQuery.script.trim())))
 
-  const handleSave = () => {
-    setProviderConnection(provider, {
-      name: isCustom ? (providerName.trim() || t('api.providerCustom')) : activeConnection.name,
-      baseUrl: baseUrl.trim(),
-      apiKey: apiKey.trim(),
-      model,
-      availableModels: liveModels ?? activeConnection.availableModels,
-      usageQuery: {
-        enabled: customUsageEnabled,
-        script: customUsageScript.trim() || DEFAULT_CUSTOM_USAGE_SCRIPT,
-      },
-    })
-    if (provider === useSettingsStore.getState().provider) setModel(model)
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 2000)
-  }
-
-  const handleAddCustomProvider = () => {
-    const id = addCustomProvider()
-    handleProviderChange(id)
-  }
-
-  const handleRemoveCustomProvider = (id: AIProvider) => {
-    const name = getProviderDisplayName(id, providerState)
-    if (!window.confirm(t('api.providerDeleteConfirm').replace('{name}', name))) return
-    removeCustomProvider(id)
-    if (provider === id) handleProviderChange(useSettingsStore.getState().provider)
-  }
-
-  const providerItems = [
-    ...BUILTIN_PROVIDER_IDS,
-    ...(customProviderIds ?? []),
-  ].filter((id, index, list) => list.indexOf(id) === index) as AIProvider[]
-
-  // ── Token 统计 ──
-  const todayUsage = dailyUsage[dateKey()]
-
-  const last7Days = useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date()
-      d.setDate(d.getDate() - (6 - i))
-      const key = dateKey(d)
-      return {
-        key,
-        label: `${d.getMonth() + 1}/${d.getDate()}`,
-        usage: dailyUsage[key]?.total ?? 0,
-      }
-    })
-  }, [dailyUsage])
-
-  const maxDayUsage = Math.max(...last7Days.map(d => d.usage), 0)
-
-  const handleResetStats = () => {
-    if (window.confirm(t('tokens.resetConfirm'))) resetStats()
-  }
-
-  return (
-    <div className={styles.subPage}>
-      <header className={styles.subHeader}>
-        <button
-          type="button"
-          className={styles.backBtn}
-          onClick={() => navigate('/settings')}
-          aria-label={t('common.back')}
-        >
-          <ArrowLeft size={18} strokeWidth={2} />
-        </button>
-        <div className={styles.headerText}>
-          <h1 className={styles.title}>{t('settings.api')}</h1>
-          <p className={styles.subtitle}>{t('api.subtitle')}</p>
+  return <div className={styles.editor} data-ui-font-min="10">
+    <div className={styles.body}>
+      <aside className={styles.sidebar} aria-label="模型服务商">
+        <div className={styles.providerList}>
+          {providerIds.map(id => {
+            const value = drafts[id] || initialDraft(id)
+            const ids = id === 'chatgpt' ? auth.models.map(item => item.id) : value.availableModels
+            return <div key={id} className={styles.providerItem}><button type="button" className={`${styles.provider} ${id === provider ? styles.selectedProvider : ''}`} aria-pressed={id === provider} onClick={() => chooseProvider(id)}>
+              <span className={styles.providerIcon}><ProviderIcon provider={id} name={value.name} size={18} /></span>
+              <span className={styles.providerName} title={value.name || id}>{value.name || id}</span>
+              {!settings.providerDisabled && id === settings.provider && <i className={styles.currentProvider} title="当前使用" aria-label="当前使用" />}
+              <span className={styles.providerCount}>{enabledModelIds(ids, value.enabledModels).length}/{ids.length}{dirtyIds.includes(id) ? ' *' : ''}</span>
+            </button><button type="button" className={styles.removeProvider} aria-label={`删除 ${value.name || id}`} title={`删除 ${value.name || id}`} onClick={() => removeProvider(id)}><Trash2 size={14} /></button></div>
+          })}
         </div>
-      </header>
-
-      <section className={`liquid-glass ${styles.card}`}>
-        <div className={styles.cardHeader}>
-          <h2 className={styles.cardTitle}>{t('api.cardTitle')}</h2>
-          <p className={styles.cardDesc}>
-            {t('api.cardDesc')}
-          </p>
+        <div className={styles.addProvider}>
+          <button type="button" className={styles.addButton} aria-haspopup="dialog" aria-expanded={adding} onClick={() => setAdding(true)}><Plus size={18} />添加服务商</button>
         </div>
-
-        <div className={styles.field}>
-          <label className={styles.label}>{t('api.provider')}</label>
-          <div className={styles.providerGroup}>
-            {providerItems.map(id => {
-              const deletable = isCustomProviderId(id)
-              return (
-                <div
-                  key={id}
-                  className={`${styles.providerOptionShell} ${deletable ? styles.providerOptionShellDeletable : ''} ${provider === id ? styles.providerOptionShellActive : ''}`}
-                >
-                  <button
-                    type="button"
-                    className={`${styles.providerOption} ${provider === id ? styles.providerOptionActive : ''}`}
-                    onClick={() => handleProviderChange(id)}
-                  >
-                    {getProviderDisplayName(id, providerState)}
-                  </button>
-                  {deletable && (
-                    <button
-                      type="button"
-                      className={styles.providerDeleteBtn}
-                      onClick={event => {
-                        event.stopPropagation()
-                        handleRemoveCustomProvider(id)
-                      }}
-                      title={t('api.providerDeleteCustom')}
-                      aria-label={t('api.providerDeleteCustom')}
-                    >
-                      <Trash2 size={13} strokeWidth={2.2} />
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-            <button
-              type="button"
-              className={`${styles.providerOption} ${styles.providerAddOption}`}
-              onClick={handleAddCustomProvider}
-              title={t('api.providerAddCustom')}
-            >
-              <Plus size={18} strokeWidth={2.4} />
-            </button>
-          </div>
-          <p className={styles.hint}>
-            {isCustom ? t('api.hintCustom') : t('api.hintOpenAICompat')}
-          </p>
-        </div>
-
-        <div className={styles.customConfigBox}>
-          {isCustom && (
-            <div className={`${styles.field} ${styles.compactField}`}>
-              <label className={styles.label}>{t('api.customNameLabel')}</label>
-              <input
-                className={styles.input}
-                type="text"
-                value={providerName}
-                onChange={e => setProviderNameInput(e.target.value)}
-                placeholder={t('api.customNamePlaceholder')}
-                spellCheck={false}
-              />
+      </aside>
+      <div className={styles.content}>
+        {!hasSelection ? <div className={styles.empty}>尚未添加服务商，请点击左侧“添加服务商”。</div> : <>
+        {provider === 'chatgpt' ? <ChatGPTSettings /> : <section className={styles.connection}>
+          <div className={styles.providerHeading}>
+            <div><h2>{draft.name}</h2></div>
+            <div className={ui.actions}>
+              <span className={styles.status}><i />{draft.apiKey.trim() ? '已配置' : '未配置'}</span>
+              {canQueryBalance && <button type="button" className={ui.button} disabled={balanceBusy} title={balances[provider]?.detail || (provider === 'opencode-go' ? '查询 5 小时、每周和每月套餐余量，不发起模型请求' : '查询余额')} onClick={() => { void queryBalance() }}>{balanceBusy ? '查询中…' : balances[provider]?.text || (provider === 'opencode-go' ? '查询余量' : '查询余额')}</button>}
             </div>
-          )}
-
-          <div className={`${styles.field} ${styles.compactField}`}>
-            <label className={styles.label}>{t('api.customBaseUrlLabel')}</label>
-            <input
-              className={styles.input}
-              type="url"
-              value={baseUrl}
-              onChange={e => setBaseUrlInput(e.target.value)}
-              placeholder={t('api.customBaseUrlPlaceholder')}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <p className={styles.hint}>{t('api.customBaseUrlHint')}</p>
           </div>
+          <div className={styles.fields}>
+            <label className={styles.field}>API Key<div className={styles.keyInput}>
+              <input className={styles.input} type={showKey ? 'text' : 'password'} value={draft.apiKey} placeholder="输入你的 API Key" autoComplete="off" spellCheck={false} onChange={event => patch(provider, { apiKey: event.target.value })} />
+              <button type="button" className={ui.iconButton} aria-label={showKey ? '隐藏 API Key' : '显示 API Key'} onClick={() => setShowKey(value => !value)}>{showKey ? <EyeOff size={17} /> : <Eye size={17} />}</button>
+            </div></label>
+          </div>
+        </section>}
 
-          <div className={`${styles.field} ${styles.compactField}`}>
-            <label className={styles.label}>{t('api.keyLabel')}</label>
-            <div className={styles.inputWrap}>
-              <input
-                className={styles.input}
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={e => setApiKeyInput(e.target.value)}
-                placeholder={t('api.keyPhCustom')}
-                spellCheck={false}
-                autoComplete="off"
-              />
-              <button
-                type="button"
-                className={styles.toggleBtn}
-                onClick={() => setShowKey(s => !s)}
-                aria-label={showKey ? t('api.hideKey') : t('api.showKey')}
-              >
-                {showKey ? <EyeOff size={18} strokeWidth={2} /> : <Eye size={18} strokeWidth={2} />}
+        <section className={styles.models}>
+          <div className={styles.sectionHeading}>
+            <div className={ui.actions}><h3>可用模型</h3><span className={styles.hint} title="启用的模型出现在 Athena 菜单中；默认模型用于学习内容生成。">{enabled.length}/{catalog.length} 已启用</span></div>
+            <div className={ui.actions}>
+              <button type="button" className={ui.button} disabled={!catalog.length} onClick={() => patch(provider, { enabledModels: [...catalog], model: draft.model || catalog[0] || '' })} aria-label="全部开启" title="全部开启">全开</button>
+              <button type="button" className={ui.button} disabled={!enabled.length} onClick={() => patch(provider, { enabledModels: [], model: '' })} aria-label="全部关闭" title="全部关闭">全关</button>
+              <button type="button" className={ui.button} disabled={Boolean(fetching) || (provider === 'chatgpt' && !auth.planEnabled)} onClick={() => { void refreshModels() }} aria-label="刷新模型目录" title={fetching === provider ? '刷新中…' : '刷新模型目录'}><RefreshCw size={14} className={fetching === provider ? styles.spinning : ''} /></button>
+            </div>
+          </div>
+          <div className={styles.search}><Search size={16} /><input aria-label="筛选模型" value={query} onChange={event => setQuery(event.target.value)} placeholder={`筛选 ${catalog.length} 个模型…`} /></div>
+          <div className={styles.modelList} aria-label="可用模型列表">
+            {shownModels.map(id => <div key={id} className={styles.modelRow}>
+              <div className={styles.modelName} title={provider === 'chatgpt' ? `${names.get(id) || id} · ${id}` : id}><span>{provider === 'chatgpt' ? names.get(id) || id : id}</span></div>
+              <button type="button" className={`${styles.defaultModel} ${draft.model === id ? styles.isDefault : ''}`} disabled={!enabled.includes(id)} aria-pressed={draft.model === id} onClick={() => patch(provider, { model: id })} aria-label={`将 ${id} 设为默认模型`} title={`将 ${id} 设为默认模型`}>
+                {draft.model === id ? <><Check size={12} />默认</> : '默认'}
               </button>
-            </div>
-            <p className={styles.hint}>{t('api.keyHintCustom')}</p>
+              <button type="button" className={ui.switch} role="switch" aria-checked={enabled.includes(id)} aria-label={`启用 ${id}`} onClick={() => toggleModel(id, !enabled.includes(id))} />
+            </div>)}
+            {!shownModels.length && <div className={styles.empty}>{query ? '没有匹配的模型。' : provider === 'chatgpt' && !auth.planEnabled ? '先连接 ChatGPT，即可查看账号可用模型。' : '暂无模型，请刷新目录或手动添加模型 ID。'}</div>}
           </div>
+        </section>
 
-          <button
-            type="button"
-            className={`${styles.fetchBtn} ${styles.modelFetchBtn} ${styles.fullActionBtn}`}
-            onClick={handleFetchModels}
-            disabled={fetching}
-          >
-            <RefreshCw
-              size={15}
-              strokeWidth={2.2}
-              className={fetching ? styles.spinIcon : undefined}
-            />
-            <span>{fetching ? t('api.modelRefreshing') : t('api.modelRefresh')}</span>
-          </button>
-        </div>
-
-        <div className={styles.field}>
-          <div className={styles.labelRow}>
-            <label className={styles.label}>{t('api.modelLabel')}</label>
-          </div>
-
-          <div className={styles.modelSelect} ref={modelBoxRef}>
-            {/* 悬停说明面板：光标停在选项或当前模型上时显示 */}
-            {tipModel && hasModelDescription(tipModel) && (
-              <div className={styles.modelTip} role="tooltip">
-                {describeModel(tipModel)}
+        <details className={styles.auxiliary} key={provider} open={custom && !getProviderConnection(provider).baseUrl.trim() ? true : undefined}>
+          <summary>更多设置<span className={styles.hint}>{provider === 'chatgpt' ? '本机统计 · 官方用量页' : '连接地址 · 手动模型 · 本机统计'}</span><ChevronDown size={14} /></summary>
+          <div className={styles.auxiliaryBody}>
+            {provider !== 'chatgpt' && <>
+              <div className={styles.fields}>
+                {custom && <label className={styles.field}>服务商名称<input className={styles.input} value={draft.name} onChange={event => patch(provider, { name: event.target.value })} /></label>}
+                <label className={styles.field}>API 地址<input className={styles.input} type="url" value={draft.baseUrl} readOnly={provider === 'opencode-go'} title={provider === 'opencode-go' ? '固定官方 Go 套餐端点，通过本机转发。' : undefined} placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false} onChange={event => patch(provider, { baseUrl: event.target.value })} /></label>
               </div>
-            )}
-
-            <button
-              type="button"
-              className={`${styles.modelTrigger} ${menuOpen ? styles.modelTriggerOpen : ''}`}
-              onClick={() => setMenuOpen(o => !o)}
-              onMouseEnter={() => setHoveredModel(null)}
-              aria-haspopup="listbox"
-              aria-expanded={menuOpen}
-            >
-              <span className={styles.modelTriggerId}>{model}</span>
-              <ChevronDown
-                size={16}
-                strokeWidth={2}
-                className={`${styles.modelChevron} ${menuOpen ? styles.modelChevronOpen : ''}`}
-              />
-            </button>
-
-            {menuOpen && (
-              <div className={styles.modelMenu} role="listbox">
-                {modelOptions.map(id => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="option"
-                    aria-selected={id === model}
-                    className={`${styles.modelOption} ${id === model ? styles.modelOptionActive : ''}`}
-                    onMouseEnter={() => setHoveredModel(id)}
-                    onFocus={() => setHoveredModel(id)}
-                    onClick={() => {
-                      setModelInput(id)
-                      setMenuOpen(false)
-                      setHoveredModel(null)
-                    }}
-                  >
-                    <span className={styles.modelOptionId}>{id}</span>
-                    {id === model && <Check size={14} strokeWidth={2.5} />}
-                  </button>
-                ))}
-              </div>
-            )}
+              <div className={styles.manualModel}><input className={styles.input} aria-label="手动添加模型 ID" value={manualModel} onChange={event => setManualModel(event.target.value)} placeholder="手动添加模型 ID" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addModel() } }} /><button type="button" className={ui.button} disabled={!manualModel.trim()} onClick={addModel}><Plus size={14} />添加</button></div>
+              {!getProviderConnection(provider).availableModels && <p className={styles.hint}>当前为内置参考目录，请刷新以确认账号权限。</p>}
+            </>}
+            {provider === 'opencode-go' && <p className={styles.hint}>使用 Go 套餐 API Key；内置只读额度查询，无需脚本。点击“查询余量”获取 5 小时、每周和每月额度，悬停查看重置时间。超额是否付费由 OpenCode 控制台设置决定。</p>}
+        {provider !== 'chatgpt' && provider !== 'opencode-go' && <details className={styles.advanced}>
+          <summary>高级设置<ChevronDown size={16} /></summary>
+          <div className={styles.advancedBody}>
+            {provider === 'deepseek' && <label className={styles.checkbox}><input type="checkbox" checked={settings.fastResponses} onChange={event => settings.setFastResponses(event.target.checked)} />优先快速响应（即时生效）</label>}
+            <label className={styles.checkbox}><input type="checkbox" checked={draft.usageQuery?.enabled || false} onChange={event => patch(provider, { usageQuery: { enabled: event.target.checked, script: draft.usageQuery?.script || DEFAULT_CUSTOM_USAGE_SCRIPT } })} />自定义余额查询</label>
+            <p className={styles.hint}>仅在你信任脚本来源时启用。余额查询不会自动执行。</p>
+            <textarea className={styles.code} aria-label="余额查询脚本" spellCheck={false} disabled={!draft.usageQuery?.enabled} value={draft.usageQuery?.script || DEFAULT_CUSTOM_USAGE_SCRIPT} onChange={event => patch(provider, { usageQuery: { enabled: draft.usageQuery?.enabled || false, script: event.target.value } })} />
+            <button type="button" className={ui.button} onClick={() => patch(provider, { usageQuery: { enabled: draft.usageQuery?.enabled || false, script: DEFAULT_CUSTOM_USAGE_SCRIPT } })}>恢复默认脚本</button>
           </div>
-
-          {/* 拉取状态 */}
-          {fetchError ? (
-            <p className={styles.modelStatusError}>
-              <AlertTriangle size={13} strokeWidth={2.2} />
-              <span>{fetchError}</span>
-            </p>
-          ) : liveModels ? (
-            <p className={styles.modelStatusOk}>
-              <Check size={13} strokeWidth={2.5} />
-              <span>
-                {t('api.modelRefreshOk').replace('{count}', String(liveModels.length))}
-                {' · '}
-                {t('api.modelLiveHint')}
-              </span>
-            </p>
-          ) : (
-            <p className={styles.hint}>{t('api.modelBuiltinHint')}</p>
-          )}
-
-          {modelOptions.some(hasModelDescription) && (
-            <p className={styles.hint}>{t('api.modelHoverHint')}</p>
-          )}
-        </div>
-
-        <details
-          className={styles.optionalPanel}
-          open={customUsageOpen}
-          onToggle={event => setCustomUsageOpen(event.currentTarget.open)}
-        >
-          <summary className={styles.optionalSummary}>
-            <div>
-              <span className={styles.optionalTitle}>{t('api.customUsageOptionalTitle')}</span>
-              <span className={styles.optionalDesc}>{t('api.customUsageOptionalDesc')}</span>
-            </div>
-            <ChevronDown size={16} strokeWidth={2.2} className={styles.optionalChevron} />
-          </summary>
-          <div className={styles.optionalBody}>
-            <label className={styles.checkLabel}>
-              <input
-                type="checkbox"
-                checked={customUsageEnabled}
-                onChange={event => setCustomUsageEnabled(event.target.checked)}
-              />
-              <span>{t('api.customUsageEnabled')}</span>
-            </label>
-            <p className={styles.hint}>{t('api.customUsageHint')}</p>
-            <div className={styles.labelRow}>
-              <label className={styles.label}>{t('api.customUsageScript')}</label>
-              <button
-                type="button"
-                className={styles.fetchBtn}
-                onClick={() => setCustomUsageScript(DEFAULT_CUSTOM_USAGE_SCRIPT)}
-              >
-                {t('api.customUsageReset')}
-              </button>
-            </div>
-            <textarea
-              className={styles.codeArea}
-              value={customUsageScript}
-              onChange={event => setCustomUsageScript(event.target.value)}
-              rows={10}
-              spellCheck={false}
-              disabled={!customUsageEnabled}
-            />
-            <p className={styles.hint}>{t('api.customUsageVars')}</p>
+        </details>}
+        <section className={styles.usage} aria-label="本机所有服务商用量合计，不代表套餐剩余额度">
+          <div className={styles.usageStats}>
+            <span>今日 Tokens<strong>{(tokens.daily[dateKey()]?.total || 0).toLocaleString()}</strong></span>
+            <span>累计 Tokens<strong>{tokens.total.total.toLocaleString()}</strong></span>
+            <span>调用<strong>{tokens.callCount.toLocaleString()}</strong></span>
+          </div>
+          <button type="button" className={ui.danger} onClick={() => { if (window.confirm('清空本机 Token 与调用统计？不会影响账单、课程和对话。')) tokens.resetStats() }}>重置统计</button>
+          {provider === 'chatgpt' && <a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">官方用量页 ↗</a>}
+          {provider === 'opencode-go' && <a href="https://opencode.ai/console" target="_blank" rel="noreferrer">OpenCode 官方控制台 ↗</a>}
+          <p className={styles.hint}>以上为所有服务商的本机合计，不代表套餐余量。</p>
+        </section>
           </div>
         </details>
-
-        {provider === 'deepseek' && <div className={styles.field}>
-          <label className={styles.label}>
-            <input type="checkbox" checked={fastResponses} onChange={event => setFastResponses(event.target.checked)} />
-            {' '}{t('progress.fastResponses')}
-          </label>
-          <p className={styles.hint}>{t('progress.fastResponsesHint')}</p>
-        </div>}
-
-        <div className={styles.field}>
-          <label className={styles.label}>
-            <input type="checkbox" checked={economyLessons} onChange={event => setEconomyLessons(event.target.checked)} />
-            {' '}{t('progress.economyLessons')}
-          </label>
-          <p className={styles.hint}>{t('progress.economyLessonsHint')}</p>
-          <LessonCostEstimate count={109} example />
-        </div>
-
-        <div className={styles.actions}>
-          <button className={styles.primaryBtn} onClick={handleSave}>
-            <Save size={16} strokeWidth={2} />
-            {t('api.save')}
-          </button>
-          {saved && (
-            <span className={styles.savedTip}>
-              <Check size={14} strokeWidth={2.5} />
-              {t('common.saved')}
-            </span>
-          )}
-        </div>
-      </section>
-
-      {/* Token 用量统计 */}
-      <section className={`liquid-glass ${styles.card}`}>
-        <div className={styles.cardHeader}>
-          <h2 className={styles.cardTitle}>{t('tokens.title')}</h2>
-          <p className={styles.cardDesc}>{t('tokens.desc')}</p>
-        </div>
-
-        {callCount === 0 ? (
-          <p className={styles.tokensEmpty}>{t('tokens.empty')}</p>
-        ) : (
-          <>
-            <div className={styles.tokensGrid}>
-              <div className={styles.tokenStat}>
-                <span className={styles.tokenNum}>{tokenTotal.total.toLocaleString()}</span>
-                <span className={styles.tokenLabel}>{t('tokens.total')}</span>
-                <span className={styles.tokenDetail}>
-                  {t('tokens.prompt')} {tokenTotal.prompt.toLocaleString()}
-                  {' · '}
-                  {t('tokens.completion')} {tokenTotal.completion.toLocaleString()}
-                </span>
-              </div>
-              <div className={styles.tokenStat}>
-                <span className={styles.tokenNum}>{todayUsage?.total.toLocaleString() ?? '0'}</span>
-                <span className={styles.tokenLabel}>{t('tokens.today')}</span>
-                <span className={styles.tokenDetail}>
-                  {t('tokens.calls')} {callCount.toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            <div className={styles.tokenChart}>
-              <div className={styles.tokenChartTitle}>{t('tokens.last7')}</div>
-              <div className={styles.tokenChartBars}>
-                {last7Days.map(d => (
-                  <div key={d.key} className={styles.tokenBarCol}>
-                    <div className={styles.tokenBar}>
-                      <div
-                        className={styles.tokenBarFill}
-                        style={{
-                          height:
-                            d.usage > 0
-                              ? `${Math.max((d.usage / maxDayUsage) * 100, 6)}%`
-                              : '2%',
-                        }}
-                        title={d.usage.toLocaleString()}
-                      />
-                    </div>
-                    <span className={styles.tokenBarLabel}>{d.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className={styles.actions}>
-              <button className={styles.ghostBtn} onClick={handleResetStats}>
-                <Trash2 size={16} strokeWidth={2} />
-                {t('tokens.reset')}
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+        {provider === 'chatgpt' && auth.modelError && <p className={styles.error} role="alert">{auth.modelError}</p>}
+        </>}
+      </div>
     </div>
-  )
+    {adding && <AddProviderPicker
+      configured={BUILTIN_PROVIDER_IDS.filter(id => providerIds.includes(id))}
+      onSelect={id => { settings.addProvider(id); chooseProvider(id) }}
+      onAddCustom={() => { const id = settings.addCustomProvider() as AIProvider; chooseProvider(id) }}
+      onClose={() => setAdding(false)}
+    />}
+    <footer className={styles.footer}>
+      <div aria-live="polite" className={error ? styles.error : styles.hint}>{error || notice || (dirty ? '有未保存的更改' : settings.providerDisabled ? '未选择当前服务商' : `当前：${getProviderDisplayName(settings.provider)} · ${settings.model || '自动选择模型'}`)}</div>
+      <div className={ui.actions}>
+        {hasSelection && provider !== nextActive && <button type="button" className={ui.button} disabled={!enabled.length} onClick={() => { setNextActive(provider); setNotice('保存后将切换当前服务商。') }}>设为当前服务商</button>}
+        <button type="button" className={ui.primary} onClick={save} disabled={!dirty || Boolean(fetching)}>保存</button>
+      </div>
+    </footer>
+  </div>
 }
