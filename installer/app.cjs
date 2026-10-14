@@ -43,7 +43,7 @@ const APP_VERSION = (() => {
     const version = JSON.parse(readFileSync(join(BASE_DIR, 'package.json'), 'utf8')).version;
     if (/^\d+\.\d+\.\d+$/.test(version)) return version;
   } catch { /* Portable EXE has no package.json beside it. */ }
-  return '0.1.2';
+  return '0.2.3';
 })();
 const BUILD_ID = '20261013-chatgpt-oauth';
 const GITHUB_REPO = 'CYRickyArAr/ChillPass';

@@ -114,7 +114,7 @@ function translateSnapshot(data) {
 async function queryCodexUsage({ expectedEmail, expectedWorkspaceId, signal, executable, spawnImpl } = {}) {
   const client = openClient(executable || findCodexExecutable(), signal, spawnImpl);
   try {
-    await client.request('initialize', { clientInfo: { name: 'chillpass_usage', title: 'ChillPass quota reader', version: '0.2.2' }, capabilities: {} });
+    await client.request('initialize', { clientInfo: { name: 'chillpass_usage', title: 'ChillPass quota reader', version: '0.2.3' }, capabilities: {} });
     client.notify('initialized');
     checkAccount(await client.request('account/read', { refreshToken: false }), expectedEmail);
     const data = await client.request('account/rateLimits/read', {});
